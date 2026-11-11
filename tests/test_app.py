@@ -186,6 +186,34 @@ class HTTPTests(unittest.TestCase):
 
 
 class CameraTests(unittest.TestCase):
+    def test_failed_encoding_does_not_kill_worker(self):
+        import cv2
+        from camera import CameraWorker
+        from unittest.mock import patch
+        store = Mock()
+        store.snapshot.return_value = replace(Config(), MIN_CAPTURE_INTERVAL=1,
+                                               MAX_CAPTURE_INTERVAL=1, DETECTION_INTERVAL=1)
+        store.changed = threading.Event()
+        stop = threading.Event()
+        now = [-1]
+        def read():
+            now[0] += 1
+            if now[0] == 3:
+                stop.set()
+                return False, None
+            return True, object()
+        capture = Mock()
+        capture.read.side_effect = read
+        detector = Mock()
+        detector.has_person.return_value = True
+        with patch('cv2.VideoCapture', return_value=capture), \
+                patch('camera.time.monotonic', side_effect=lambda: now[0]), \
+                patch('cv2.imencode', side_effect=cv2.error('encoding failed')) as encode, \
+                self.assertLogs(level='ERROR'):
+            CameraWorker(store, detector, stop).run()
+        encode.assert_called_once()
+        capture.release.assert_called()
+
     def test_only_current_positive_frames_saved_at_original_resolution(self):
         import cv2
         import numpy as np

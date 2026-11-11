@@ -100,7 +100,7 @@ class CameraWorker(threading.Thread):
                         finally:
                             temporary.unlink(missing_ok=True)
                         logging.info('Saved %s', target)
-                    except OSError:
+                    except (OSError, cv2.error):
                         logging.exception('Unable to save photograph')
                     scheduler.schedule(time.monotonic(), config)
         finally:

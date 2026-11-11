@@ -103,7 +103,7 @@ Tests use temporary files, fake model output, and a local HTTP server; no camera
 or downloaded model is needed:
 
 ```sh
-pip install python-dotenv watchdog
+pip install -r requirements.txt
 python -m unittest discover -s tests -v
 ```
 
@@ -128,3 +128,12 @@ docker run --rm -v "$PWD/tests:/app/tests:ro" \
 
 The default Compose image name above follows this repository directory name;
 use the image name printed by `docker compose images` if you rename the directory.
+
+Implementation verification: the image builds on Linux/ARM64 through Docker
+Desktop; all 11 hardware-free tests pass inside it. YOLO initialization and
+synthetic empty-frame inference also pass with `--network none`. A camera-less
+application process retries the unavailable device and stops promptly on SIGTERM.
+Real Linux webcam capture, Linux/AMD64, LAN access, and long-running resource
+usage still require deployment hardware. An extra running-process HTTP smoke
+check was blocked by local Docker-exec permissions; HTTP and live configuration
+behavior are covered by the container test suite.
