@@ -38,11 +38,13 @@ class CameraWorker(threading.Thread):
         occupancy = Occupancy()
         scheduler = Scheduler()
         next_detection = 0
+        previous_config = None
         try:
             while not self.stop_event.is_set():
-                changed = self.store.changed.is_set()
                 self.store.changed.clear()
                 config = self.store.snapshot()
+                changed = config != previous_config
+                previous_config = config
                 if capture is None or device != config.CAMERA_DEVICE:
                     if capture is not None:
                         capture.release()

@@ -1,4 +1,4 @@
-opencv-python
-ultralytics
-watchdog
-python-dotenv
+opencv-python==5.0.0.93
+ultralytics==8.4.210
+watchdog==7.1.0
+python-dotenv==1.2.4

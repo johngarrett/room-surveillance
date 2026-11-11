@@ -1,0 +1,16 @@
+services:
+  room-camera:
+    build: .
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
+    devices:
+      - /dev/video0:/dev/video0
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./photos:/app/photos
+      - ./config:/app/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      PYTHONUNBUFFERED: "1"

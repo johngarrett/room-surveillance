@@ -2,6 +2,7 @@
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import logging
+from io import StringIO
 import math
 import os
 import re
@@ -9,6 +10,7 @@ import tempfile
 import threading
 
 from dotenv import dotenv_values
+from dotenv.parser import parse_stream
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -32,7 +34,10 @@ class Config:
 def load_config(path: Path) -> Config:
     if not path.is_file():
         raise ValueError(f'Missing configuration: {path}; copy .env.example there')
-    values = dotenv_values(path, interpolate=False)
+    content = path.read_text()
+    if any(binding.error for binding in parse_stream(StringIO(content))):
+        raise ValueError('Invalid .env syntax')
+    values = dotenv_values(stream=StringIO(content), interpolate=False)
     defaults = asdict(Config())
     for key in defaults:
         if key not in values:
