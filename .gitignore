@@ -1,0 +1,9 @@
+.env
+config/.env
+photos/*
+!photos/.gitkeep
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
+*.pt
