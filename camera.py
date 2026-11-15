@@ -1,4 +1,4 @@
-"""Continuously drain the camera; detection and saves use the latest original frame."""
+"""Continuous capture or periodic snapshots, with person detection before saving."""
 from datetime import datetime
 import logging
 import platform
@@ -50,6 +50,14 @@ class CameraWorker(threading.Thread):
         self.store, self.detector, self.stop_event = store, detector, stop
         self.preview_frame = None
 
+    def wait_for_snapshot(self, config):
+        deadline = time.monotonic() + config.CAMERA_SNAPSHOT_INTERVAL
+        logging.info('Snapshot mode: camera released; next check in %s seconds', config.CAMERA_SNAPSHOT_INTERVAL)
+        while not self.stop_event.is_set() and not self.store.changed.is_set():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or self.stop_event.wait(min(1, remaining)):
+                break
+
     def run(self):
         import cv2
         capture = None
@@ -68,8 +76,15 @@ class CameraWorker(threading.Thread):
                 config = self.store.snapshot()
                 changed = config != previous_config
                 previous_config = config
+                if config.CAMERA_SNAPSHOT_ENABLED and not config.CAPTURE_ENABLED:
+                    self.preview_frame = None
+                    if capture is not None:
+                        capture.release()
+                        capture = None
+                    self.wait_for_snapshot(config)
+                    continue
                 settings = (config.CAMERA_DEVICE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT, config.CAMERA_FPS)
-                if capture is not None and config.CAMERA_CYCLE_ENABLED and time.monotonic() - stream_started >= 5:
+                if capture is not None and config.CAMERA_CYCLE_ENABLED and not config.CAMERA_SNAPSHOT_ENABLED and time.monotonic() - stream_started >= 5:
                     self.preview_frame = None
                     capture.release()
                     capture = None
@@ -104,20 +119,34 @@ class CameraWorker(threading.Thread):
                     next_detection = 0
                     stream_started = time.monotonic()
                     stream_announced = False
-                ok, frame = capture.read()
-                if not ok:
-                    self.preview_frame = None
-                    retry_delay = 20 if config.CAMERA_CYCLE_ENABLED else 3
-                    logging.warning('Camera unavailable: %s; retrying in %s seconds', device, retry_delay)
+                try:
+                    ok, frame = capture.read()
+                except cv2.error:
+                    logging.exception('Unable to read camera frame')
+                    ok, frame = False, None
+                if config.CAMERA_SNAPSHOT_ENABLED:
                     capture.release()
                     capture = None
-                    self.stop_event.wait(retry_delay)
+                    self.preview_frame = None
+                if not ok:
+                    self.preview_frame = None
+                    retry_delay = (config.CAMERA_SNAPSHOT_INTERVAL if config.CAMERA_SNAPSHOT_ENABLED
+                                   else 20 if config.CAMERA_CYCLE_ENABLED else 3)
+                    logging.warning('Camera unavailable: %s; retrying in %s seconds', device, retry_delay)
+                    if capture is not None:
+                        capture.release()
+                        capture = None
+                    if config.CAMERA_SNAPSHOT_ENABLED:
+                        self.wait_for_snapshot(config)
+                    else:
+                        self.stop_event.wait(retry_delay)
                     continue
                 now = time.monotonic()
-                if config.CAMERA_CYCLE_ENABLED and not stream_announced:
+                if config.CAMERA_CYCLE_ENABLED and not config.CAMERA_SNAPSHOT_ENABLED and not stream_announced:
                     logging.info('Camera cycle: first frame received; streaming window active')
                     stream_announced = True
-                self.preview_frame = (now, frame)
+                if not config.CAMERA_SNAPSHOT_ENABLED:
+                    self.preview_frame = (now, frame)
                 if changed:
                     next_detection = now
                 if now < next_detection:
@@ -127,9 +156,21 @@ class CameraWorker(threading.Thread):
                     positive = self.detector.has_person(frame, config.PERSON_CONFIDENCE)
                 except Exception:
                     logging.exception('Detection failed; discarding frame')
+                    if config.CAMERA_SNAPSHOT_ENABLED:
+                        self.wait_for_snapshot(config)
                     continue
                 logging.info('PERSON %s (confidence threshold %.2f)',
                              'detected' if positive else 'not detected', config.PERSON_CONFIDENCE)
+                if config.CAMERA_SNAPSHOT_ENABLED:
+                    if positive and not self.stop_event.is_set() and self.store.snapshot() == config:
+                        try:
+                            save_photo(frame, config.PHOTO_DIR)
+                        except (OSError, cv2.error):
+                            logging.exception('Unable to save snapshot')
+                    elif not positive:
+                        logging.info('Snapshot discarded: no person detected')
+                    self.wait_for_snapshot(config)
+                    continue
                 was_occupied = occupancy.occupied
                 occupied = occupancy.update(positive, now, config.EMPTY_TIMEOUT)
                 if was_occupied != occupied:

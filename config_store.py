@@ -26,6 +26,8 @@ class Config:
     CAMERA_FORMAT: str = 'MJPG'
     CAMERA_FPS: int = 25
     CAMERA_CYCLE_ENABLED: bool = False
+    CAMERA_SNAPSHOT_ENABLED: bool = False
+    CAMERA_SNAPSHOT_INTERVAL: float = 300
     DETECTION_INTERVAL: float = 3
     PERSON_CONFIDENCE: float = .5
     EMPTY_TIMEOUT: float = 30
@@ -50,7 +52,7 @@ def load_config(path: Path) -> Config:
         value = values[key]
         if value is None or not value.strip():
             raise ValueError(f'{key} must not be empty')
-        if key in ('CAPTURE_ENABLED', 'CAMERA_CYCLE_ENABLED'):
+        if key in ('CAPTURE_ENABLED', 'CAMERA_CYCLE_ENABLED', 'CAMERA_SNAPSHOT_ENABLED'):
             if value.lower() not in ('true', 'false'):
                 raise ValueError(f'{key} must be true or false')
             defaults[key] = value.lower() == 'true'
@@ -70,7 +72,7 @@ def load_config(path: Path) -> Config:
         raise ValueError('CAMERA_FORMAT must be a four-character format code, e.g. MJPG')
     if not 1 <= config.CAMERA_FPS <= 240:
         raise ValueError('CAMERA_FPS must be between 1 and 240')
-    for key in ('DETECTION_INTERVAL', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL'):
+    for key in ('DETECTION_INTERVAL', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL', 'CAMERA_SNAPSHOT_INTERVAL'):
         value = getattr(config, key)
         if not math.isfinite(value) or not 0 < value <= 86400:
             raise ValueError(f'{key} must be greater than 0 and at most 86400')

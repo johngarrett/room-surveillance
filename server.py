@@ -57,6 +57,9 @@ def make_server(store, camera=None, logs=None):
             if route == '/logs':
                 self.send(200, json.dumps(logs.snapshot() if logs is not None else []).encode())
             elif route == '/live.jpg':
+                if config.CAMERA_SNAPSHOT_ENABLED:
+                    self.send(503, b'{"error": "Live preview is disabled in snapshot mode"}')
+                    return
                 preview = camera.preview_frame if camera is not None else None
                 if preview is None or time.monotonic() - preview[0] > 3:
                     self.send(503, b'{"error": "Camera unavailable"}')
@@ -87,7 +90,8 @@ def make_server(store, camera=None, logs=None):
                         continue
                     photos.append(f'<figure><a href="/photos/{quote(path.name)}"><img src="/photos/{quote(path.name)}" loading="lazy" alt=""></a><figcaption>{escape(caption)}</figcaption></figure>')
                 try:
-                    body = TEMPLATE.read_text().replace('{{photos}}', '\n'.join(photos)).encode()
+                    body = (TEMPLATE.read_text().replace('{{photos}}', '\n'.join(photos))
+                            .replace('{{snapshot_mode}}', 'true' if config.CAMERA_SNAPSHOT_ENABLED else 'false').encode())
                     self.send(200, body, 'text/html; charset=utf-8')
                 except OSError:
                     logging.exception('Cannot read gallery template')
@@ -136,6 +140,9 @@ def make_server(store, camera=None, logs=None):
                 if not isinstance(updates, dict):
                     raise ValueError('Expected a settings object')
                 if self.path == '/capture':
+                    if store.snapshot().CAMERA_SNAPSHOT_ENABLED:
+                        self.send(409, b'{"error": "Manual capture is disabled in snapshot mode"}')
+                        return
                     preview = camera.preview_frame if camera is not None else None
                     if preview is None or time.monotonic() - preview[0] > 3:
                         self.send(503, b'{"error": "Camera unavailable"}')

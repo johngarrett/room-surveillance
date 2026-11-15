@@ -29,7 +29,9 @@ class ConfigTests(unittest.TestCase):
                      'CAPTURE_ENABLED=yes', 'PORT=0', 'MAX_CAPTURE_INTERVAL=nan',
                      'PERSON_CONFIDENCE="unterminated', 'CAMERA_WIDTH=0',
                      'CAMERA_HEIGHT=16385', 'CAMERA_WIDTH=1.5', 'CAMERA_FORMAT=MJPEG',
-                     'CAMERA_CYCLE_ENABLED=yes', 'CAMERA_FPS=0', 'CAMERA_FPS=241', 'CAMERA_FPS=1.5'):
+                     'CAMERA_CYCLE_ENABLED=yes', 'CAMERA_FPS=0', 'CAMERA_FPS=241', 'CAMERA_FPS=1.5',
+                     'CAMERA_SNAPSHOT_ENABLED=yes', 'CAMERA_SNAPSHOT_INTERVAL=0',
+                     'CAMERA_SNAPSHOT_INTERVAL=nan', 'CAMERA_SNAPSHOT_INTERVAL=86401'):
             with self.subTest(text=text):
                 self.path.write_text(text)
                 with self.assertRaises(ValueError):
@@ -48,6 +50,15 @@ class ConfigTests(unittest.TestCase):
         self.assertFalse(load_config(self.path).CAMERA_CYCLE_ENABLED)
         self.path.write_text('CAMERA_CYCLE_ENABLED=true\n')
         self.assertTrue(load_config(self.path).CAMERA_CYCLE_ENABLED)
+
+    def test_snapshot_configuration(self):
+        config = load_config(self.path)
+        self.assertFalse(config.CAMERA_SNAPSHOT_ENABLED)
+        self.assertEqual(300, config.CAMERA_SNAPSHOT_INTERVAL)
+        self.path.write_text('CAMERA_SNAPSHOT_ENABLED=true\nCAMERA_SNAPSHOT_INTERVAL=600\n')
+        config = load_config(self.path)
+        self.assertTrue(config.CAMERA_SNAPSHOT_ENABLED)
+        self.assertEqual(600, config.CAMERA_SNAPSHOT_INTERVAL)
 
     def test_invalid_reload_keeps_snapshot(self):
         before = self.store.snapshot()
@@ -242,6 +253,103 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual([], list(self.photos.glob('*.tmp')))
         self.camera.preview_frame = (time.monotonic() - 4, frame)
         self.assertEqual(503, self.request('POST', '/capture', '{}', headers)[0])
+
+    def test_snapshot_mode_disables_live_and_manual_capture(self):
+        import numpy as np
+        self.store._snapshot = replace(self.store.snapshot(), CAMERA_SNAPSHOT_ENABLED=True)
+        self.camera.preview_frame = (time.monotonic(), np.zeros((480, 640, 3), dtype=np.uint8))
+        self.assertEqual(503, self.request('GET', '/live.jpg')[0])
+        status, body, _ = self.request('POST', '/capture', '{}', {'Content-Type': 'application/json'})
+        self.assertEqual(409, status)
+        self.assertIn('snapshot mode', json.loads(body)['error'])
+        self.assertEqual([], list(self.photos.glob('*.jpg')))
+        self.assertIn(b'data-snapshot-mode="true"', self.request('GET', '/')[1])
+
+
+class SnapshotTests(unittest.TestCase):
+    def test_one_frame_released_before_detection_and_saved_only_for_person(self):
+        import cv2
+        import numpy as np
+        from camera import CameraWorker
+        from unittest.mock import patch
+        for outcome in ('person', 'empty', 'read_failure', 'read_exception', 'detection_failure', 'disabled_during_detection', 'save_failure'):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
+                config = replace(Config(), CAMERA_SNAPSHOT_ENABLED=True, CAMERA_CYCLE_ENABLED=True,
+                                 PHOTO_DIR=Path(directory) / 'photos')
+                store = Mock()
+                store.snapshot.return_value = config
+                store.changed = threading.Event()
+                stop = threading.Event()
+                capture = Mock()
+                frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+                capture.read.return_value = (outcome != 'read_failure', frame)
+                if outcome == 'read_exception':
+                    capture.read.side_effect = cv2.error('read failed')
+                detector = Mock()
+                worker = CameraWorker(store, detector, stop)
+                def detect(image, confidence):
+                    capture.release.assert_called_once()
+                    self.assertIsNone(worker.preview_frame)
+                    self.assertIs(frame, image)
+                    self.assertEqual(config.PERSON_CONFIDENCE, confidence)
+                    if outcome == 'detection_failure':
+                        raise RuntimeError('inference failed')
+                    if outcome == 'disabled_during_detection':
+                        store.snapshot.return_value = replace(config, CAPTURE_ENABLED=False)
+                    return outcome != 'empty'
+                detector.has_person.side_effect = detect
+                if outcome == 'save_failure':
+                    config.PHOTO_DIR.write_text('not a directory')
+                with patch('cv2.VideoCapture', return_value=capture) as open_camera, \
+                        patch.object(worker, 'wait_for_snapshot', side_effect=lambda _: stop.set()) as wait, \
+                        self.assertLogs(level='INFO'):
+                    worker.run()
+                open_camera.assert_called_once()
+                capture.read.assert_called_once()
+                capture.release.assert_called_once()
+                wait.assert_called_once_with(config)
+                if outcome in ('read_failure', 'read_exception'):
+                    detector.has_person.assert_not_called()
+                else:
+                    detector.has_person.assert_called_once()
+                photos = list(config.PHOTO_DIR.glob('*.jpg'))
+                self.assertEqual(1 if outcome == 'person' else 0, len(photos))
+                if photos:
+                    self.assertEqual(frame.shape, cv2.imread(str(photos[0])).shape)
+                self.assertIsNone(worker.preview_frame)
+
+    def test_disabled_capture_does_not_open_camera(self):
+        from camera import CameraWorker
+        from unittest.mock import patch
+        store = Mock()
+        store.snapshot.return_value = replace(Config(), CAMERA_SNAPSHOT_ENABLED=True, CAPTURE_ENABLED=False)
+        store.changed = threading.Event()
+        stop = threading.Event()
+        worker = CameraWorker(store, Mock(), stop)
+        with patch('cv2.VideoCapture') as open_camera, \
+                patch.object(worker, 'wait_for_snapshot', side_effect=lambda _: stop.set()) as wait:
+            worker.run()
+        open_camera.assert_not_called()
+        wait.assert_called_once()
+
+    def test_snapshot_wait_uses_interval_and_handles_config_changes_and_shutdown(self):
+        from camera import CameraWorker
+        from unittest.mock import patch
+        store = Mock()
+        store.changed = threading.Event()
+        stop = threading.Event()
+        worker = CameraWorker(store, Mock(), stop)
+        with patch('camera.time.monotonic', side_effect=[0, 0, 300]), patch.object(stop, 'wait', return_value=False) as wait:
+            worker.wait_for_snapshot(Config())
+        wait.assert_called_once_with(1)
+        store.changed.set()
+        with patch.object(stop, 'wait') as wait:
+            worker.wait_for_snapshot(Config())
+        wait.assert_not_called()
+        store.changed.clear()
+        with patch.object(stop, 'wait', return_value=True) as wait:
+            worker.wait_for_snapshot(Config())
+        wait.assert_called_once()
 
 
 class CameraTests(unittest.TestCase):

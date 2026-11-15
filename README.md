@@ -90,6 +90,8 @@ mounted so editor atomic replacements remain visible inside Docker.
 | CAMERA_FORMAT | MJPG | Four-character Linux capture format code; MJPG means MJPEG |
 | CAMERA_FPS | 25 | Requested capture frame rate, 1–240; must be supported by the camera |
 | CAMERA_CYCLE_ENABLED | false | Workaround: alternate 5 seconds streaming with 20 seconds released |
+| CAMERA_SNAPSHOT_ENABLED | false | Open briefly for one frame, release, then detect and save only if a person is found |
+| CAMERA_SNAPSHOT_INTERVAL | 300 | Seconds between snapshot attempts, measured after each completed attempt |
 | DETECTION_INTERVAL | 3 | Seconds between inference checks |
 | PERSON_CONFIDENCE | 0.5 | Person confidence threshold, 0–1 |
 | EMPTY_TIMEOUT | 30 | Seconds since last positive detection before vacancy |
@@ -100,6 +102,20 @@ mounted so editor atomic replacements remain visible inside Docker.
 | PORT | 5418 | HTTP port; restart required to change |
 
 Positive intervals are limited to 86400 seconds; empty timeout allows 0–86400.
+For periodic photos without a continuous stream, set `CAMERA_SNAPSHOT_ENABLED=true`
+and `CAMERA_SNAPSHOT_INTERVAL=300` in `config/.env`. The first attempt is immediate;
+later attempts run five minutes after the previous attempt finishes. Each attempt
+opens the configured camera, reads one full-resolution frame, releases the camera,
+then runs detection. One positive detection saves that frame; otherwise it is
+discarded without writing an image to disk. Failures also wait the full interval.
+`CAPTURE_ENABLED=false` prevents snapshot attempts entirely. Snapshot mode ignores
+the continuous detection, vacancy, random capture intervals, and camera cycling
+settings, but uses `PERSON_CONFIDENCE` and the configured camera mode. Live preview
+and manual capture are disabled; reload the page after changing modes. Existing
+photos remain available. Configuration edits interrupt the wait within a second;
+shutdown interrupts it immediately. Reopening can still fail, and blocked camera
+calls cannot be forcibly interrupted by this mode. This is not USB power cycling.
+
 Set `CAMERA_CYCLE_ENABLED=true` in `config/.env` to try periodic camera restarts.
 Live preview, detection, and manual photos are unavailable during each pause.
 Photo deadlines survive planned pauses; a due photo still needs a fresh person

@@ -28,7 +28,7 @@
   <details id="settings">
     <summary>settings</summary>
   <div class="monitor">
-  <section class="live" aria-label="Live camera">
+  <section class="live" aria-label="Live camera" data-snapshot-mode="{{snapshot_mode}}">
     <img id="live" alt="Live camera feed">
     <p id="live-status" role="status">Connecting to camera…</p>
     <button id="capture" type="button">take photo</button>
@@ -72,6 +72,8 @@
     refreshLogs();
     const captureButton = document.getElementById('capture');
     const captureStatus = document.getElementById('capture-status');
+    const snapshotMode = document.querySelector('.live').dataset.snapshotMode === 'true';
+    captureButton.disabled = snapshotMode;
     captureButton.addEventListener('click', async () => {
       captureButton.disabled = true;
       captureStatus.textContent = 'Saving…';
@@ -101,6 +103,11 @@
     const live = document.getElementById('live');
     const liveStatus = document.getElementById('live-status');
     function refreshLive() {
+      if (snapshotMode) {
+        live.hidden = true;
+        liveStatus.textContent = 'Snapshot mode: periodic person checks. Live preview and manual capture are off.';
+        return;
+      }
       if (!document.hidden && document.getElementById('settings').open) live.src = `/live.jpg?t=${Date.now()}`;
       else setTimeout(refreshLive, 1000);
     }
