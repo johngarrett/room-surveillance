@@ -175,7 +175,7 @@ class HTTPTests(unittest.TestCase):
         text = body.decode()
         self.assertLess(text.index('2026-11-12'), text.index('2026-11-11'))
         self.assertNotIn('2026-11-13', text)
-        self.assertIn('2026-11-11 10:23:05', text)
+        self.assertIn('10:23:05 2026-11-11', text)
         status, body, headers = self.request('GET', '/photos/20261111_102305.jpg')
         self.assertEqual((200, b'jpeg', 'image/jpeg'), (status, body, headers['Content-Type']))
         for path in ('/.env', '/photos/../.env', '/photos/%2e%2e%2f.env',
@@ -202,6 +202,7 @@ class HTTPTests(unittest.TestCase):
         import cv2
         import numpy as np
         self.assertEqual(503, self.request('GET', '/live.jpg')[0])
+
         frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
         self.camera.preview_frame = (time.monotonic(), frame)
         status, body, headers = self.request('GET', '/live.jpg?t=1')
@@ -212,6 +213,23 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual((540, 960, 3), decoded.shape)
         self.camera.preview_frame = (time.monotonic() - 4, frame)
         self.assertEqual(503, self.request('GET', '/live.jpg')[0])
+
+    def test_manual_capture(self):
+        import cv2
+        import numpy as np
+        headers = {'Content-Type': 'application/json'}
+        self.assertEqual(403, self.request('POST', '/capture', '{}')[0])
+        self.assertEqual(503, self.request('POST', '/capture', '{}', headers)[0])
+        frame = np.zeros((480, 640, 3), dtype=np.uint8)
+        self.camera.preview_frame = (time.monotonic(), frame)
+        status, body, _ = self.request('POST', '/capture', '{}', headers)
+        self.assertEqual(200, status)
+        name = json.loads(body)['url'].split('/')[-1]
+        self.assertEqual(f'{name[9:11]}:{name[11:13]}:{name[13:15]} {name[:4]}-{name[4:6]}-{name[6:8]}', json.loads(body)['caption'])
+        self.assertEqual(frame.shape, cv2.imread(str(self.photos / name)).shape)
+        self.assertEqual([], list(self.photos.glob('*.tmp')))
+        self.camera.preview_frame = (time.monotonic() - 4, frame)
+        self.assertEqual(503, self.request('POST', '/capture', '{}', headers)[0])
 
 
 class CameraTests(unittest.TestCase):

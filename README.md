@@ -5,6 +5,8 @@ One Python process serves a plain HTML gallery and settings on your trusted LAN.
 No accounts, database, recorded video, audio, face recognition, or cloud service.
 The live preview refreshes up to five times per second while the page is visible;
 it uses the same camera as detection and does not save preview images.
+Use **take photo** below the live view to save the current full-resolution frame
+immediately, even when automatic capture is off or no person is detected.
 
 ## Native setup (Python 3.12+)
 

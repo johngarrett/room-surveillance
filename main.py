@@ -7,11 +7,13 @@ import threading
 from camera import CameraWorker
 from config import ConfigStore
 from detector import Detector
-from server import make_server
+from server import make_server, RecentLogs
 
 
 def main():
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    logs = RecentLogs()
+    logging.getLogger().addHandler(logs)
     stop = threading.Event()
     for signum in (signal.SIGINT, signal.SIGTERM):
         signal.signal(signum, lambda *_: stop.set())
@@ -24,7 +26,7 @@ def main():
         store = ConfigStore(Path('config/.env'))
         detector = Detector()
         camera = CameraWorker(store, detector, stop)
-        server = make_server(store, camera)
+        server = make_server(store, camera, logs)
         store.start()
         watching = True
         http_thread = threading.Thread(target=server.serve_forever, name='http')
@@ -46,6 +48,7 @@ def main():
             camera.join()
         if watching:
             store.stop()
+        logging.getLogger().removeHandler(logs)
     return 0
 
 

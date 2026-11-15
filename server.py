@@ -1,5 +1,6 @@
 """Plain HTML gallery and narrowly scoped JSON settings endpoints."""
 from dataclasses import asdict
+from collections import deque
 from datetime import datetime
 from html import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,7 +19,28 @@ TEMPLATE = Path(__file__).parent / 'static/index.html'
 PHOTO_NAME = re.compile(r'^\d{8}_\d{6}(?:_[a-zA-Z0-9]+)?\.jpg$')
 
 
-def make_server(store, camera=None):
+def photo_caption(name):
+    return datetime.strptime(name[:15], '%Y%m%d_%H%M%S').strftime('%H:%M:%S %Y-%m-%d')
+
+
+class RecentLogs(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.lines = deque(maxlen=100)
+        self.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s', '%H:%M:%S'))
+
+    def emit(self, record):
+        self.lines.append(self.format(record))
+
+    def snapshot(self):
+        self.acquire()
+        try:
+            return list(self.lines)
+        finally:
+            self.release()
+
+
+def make_server(store, camera=None, logs=None):
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, body, content_type='application/json; charset=utf-8'):
             self.send_response(status)
@@ -32,7 +54,9 @@ def make_server(store, camera=None):
         def do_GET(self):
             route = urlsplit(self.path).path
             config = store.snapshot()
-            if route == '/live.jpg':
+            if route == '/logs':
+                self.send(200, json.dumps(logs.snapshot() if logs is not None else []).encode())
+            elif route == '/live.jpg':
                 preview = camera.preview_frame if camera is not None else None
                 if preview is None or time.monotonic() - preview[0] > 3:
                     self.send(503, b'{"error": "Camera unavailable"}')
@@ -58,7 +82,7 @@ def make_server(store, camera=None):
                     if not PHOTO_NAME.fullmatch(path.name) or path.is_symlink() or not path.is_file():
                         continue
                     try:
-                        caption = datetime.strptime(path.name[:15], '%Y%m%d_%H%M%S').strftime('%Y-%m-%d %H:%M:%S')
+                        caption = photo_caption(path.name)
                     except ValueError:
                         continue
                     photos.append(f'<figure><a href="/photos/{quote(path.name)}"><img src="/photos/{quote(path.name)}" loading="lazy" alt=""></a><figcaption>{escape(caption)}</figcaption></figure>')
@@ -123,7 +147,7 @@ def make_server(store, camera=None):
                         logging.exception('Cannot save manual photograph')
                         self.send(500, b'{"error": "Unable to save photo"}')
                         return
-                    self.send(200, json.dumps({'url': '/photos/' + name}).encode())
+                    self.send(200, json.dumps({'url': '/photos/' + name, 'caption': photo_caption(name)}).encode())
                     return
                 store.update(updates)
                 self.send(200, b'{"saved": true}')
