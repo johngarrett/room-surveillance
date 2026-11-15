@@ -9,6 +9,24 @@ import uuid
 from scheduler import Scheduler
 
 
+def save_photo(frame, directory):
+    import cv2
+    directory.mkdir(parents=True, exist_ok=True)
+    name = datetime.now().strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:8] + '.jpg'
+    target = directory / name
+    ok, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+    if not ok:
+        raise OSError('JPEG encoding failed')
+    temporary = target.with_suffix('.tmp')
+    try:
+        temporary.write_bytes(encoded.tobytes())
+        temporary.replace(target)
+    finally:
+        temporary.unlink(missing_ok=True)
+    logging.info('Saved %s', target)
+    return name
+
+
 class Occupancy:
     def __init__(self):
         self.occupied = False
@@ -30,6 +48,7 @@ class CameraWorker(threading.Thread):
     def __init__(self, store, detector, stop):
         super().__init__(name='camera')
         self.store, self.detector, self.stop_event = store, detector, stop
+        self.preview_frame = None
 
     def run(self):
         import cv2
@@ -46,6 +65,7 @@ class CameraWorker(threading.Thread):
                 changed = config != previous_config
                 previous_config = config
                 if capture is None or device != config.CAMERA_DEVICE:
+                    self.preview_frame = None
                     if capture is not None:
                         capture.release()
                     occupancy = Occupancy()
@@ -60,12 +80,14 @@ class CameraWorker(threading.Thread):
                     next_detection = 0
                 ok, frame = capture.read()
                 if not ok:
+                    self.preview_frame = None
                     logging.warning('Camera unavailable: %s; retrying in 3 seconds', device)
                     capture.release()
                     capture = None
                     self.stop_event.wait(3)
                     continue
                 now = time.monotonic()
+                self.preview_frame = (now, frame)
                 if changed:
                     next_detection = now
                 if now < next_detection:
@@ -86,23 +108,11 @@ class CameraWorker(threading.Thread):
                     if self.store.snapshot() != config:
                         continue
                     try:
-                        config.PHOTO_DIR.mkdir(parents=True, exist_ok=True)
-                        name = datetime.now().strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:8] + '.jpg'
-                        target = config.PHOTO_DIR / name
-                        # Encode before publication so gallery requests never see partial JPEGs.
-                        ok, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
-                        if not ok:
-                            raise OSError('JPEG encoding failed')
-                        temporary = target.with_suffix('.tmp')
-                        try:
-                            temporary.write_bytes(encoded.tobytes())
-                            temporary.replace(target)
-                        finally:
-                            temporary.unlink(missing_ok=True)
-                        logging.info('Saved %s', target)
+                        save_photo(frame, config.PHOTO_DIR)
                     except (OSError, cv2.error):
                         logging.exception('Unable to save photograph')
                     scheduler.schedule(time.monotonic(), config)
         finally:
+            self.preview_frame = None
             if capture is not None:
                 capture.release()

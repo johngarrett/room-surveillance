@@ -14,27 +14,58 @@
     summary { cursor: pointer; width: fit-content; }
     form { display: grid; gap: 8px; max-width: 360px; margin-top: 12px; }
     label { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
-    input, button { font: inherit; }
+    .help { color: #666; font-size: 12px; line-height: 1.4; margin: -4px 0 8px; }
+    input, select, button { font: inherit; }
     input[type=number] { width: 100px; }
     button { width: fit-content; }
+    .live { max-width: 960px; margin-bottom: 20px; }
   </style>
 </head>
 <body>
+  <section class="live" aria-label="Live camera">
+    <img id="live" alt="Live camera feed">
+    <p id="live-status" role="status">Connecting to camera…</p>
+  </section>
   <details id="settings">
     <summary>settings</summary>
     <form id="form">
-      <label>capture enabled <input name="CAPTURE_ENABLED" type="checkbox"></label>
-      <label>minimum interval (seconds) <input name="MIN_CAPTURE_INTERVAL" type="number" min="0.001" max="86400" step="any" required></label>
-      <label>maximum interval (seconds) <input name="MAX_CAPTURE_INTERVAL" type="number" min="0.001" max="86400" step="any" required></label>
-      <label>detection interval (seconds) <input name="DETECTION_INTERVAL" type="number" min="0.001" max="86400" step="any" required></label>
-      <label>person confidence <input name="PERSON_CONFIDENCE" type="number" min="0" max="1" step="any" required></label>
-      <label>empty timeout (seconds) <input name="EMPTY_TIMEOUT" type="number" min="0" max="86400" step="any" required></label>
+      <label>camera <select name="CAMERA_DEVICE" aria-describedby="camera-help" required></select></label>
+      <p class="help" id="camera-help">Choose the camera for the live view and photos. Numbers are camera indices, not detected devices; 0 is usually the default. Save to switch.</p>
+      <label>capture enabled <input name="CAPTURE_ENABLED" type="checkbox" aria-describedby="capture-help"></label>
+      <p class="help" id="capture-help">Save photos while a person is detected. Turning this off keeps the live view and detection running.</p>
+      <label>minimum interval (seconds) <input name="MIN_CAPTURE_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="minimum-help" required></label>
+      <p class="help" id="minimum-help">Shortest random wait before a photo. Each wait is chosen between the minimum and maximum.</p>
+      <label>maximum interval (seconds) <input name="MAX_CAPTURE_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="maximum-help" required></label>
+      <p class="help" id="maximum-help">Longest random wait before a photo becomes due. A photo still waits for a fresh person detection. Must be at least the minimum.</p>
+      <label>detection interval (seconds) <input name="DETECTION_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="detection-help" required></label>
+      <p class="help" id="detection-help">How often a frame is checked for a person: 3 means roughly every 3 seconds. Lower values respond faster but use more CPU. This does not change the live view refresh rate.</p>
+      <label>person confidence <input name="PERSON_CONFIDENCE" type="number" min="0" max="1" step="any" aria-describedby="confidence-help" required></label>
+      <p class="help" id="confidence-help">Detection score threshold, from 0 to 1. Higher values reduce false detections but may miss people; lower values accept more detections.</p>
+      <label>empty timeout (seconds) <input name="EMPTY_TIMEOUT" type="number" min="0" max="86400" step="any" aria-describedby="empty-help" required></label>
+      <p class="help" id="empty-help">Time since the last person detection before the room is marked empty and its photo schedule is canceled. Photos always require a current person detection.</p>
       <button type="submit" disabled>save</button>
     </form>
     <p id="status" role="status"></p>
   </details>
   <main class="gallery">{{photos}}</main>
   <script>
+    const live = document.getElementById('live');
+    const liveStatus = document.getElementById('live-status');
+    function refreshLive() {
+      if (!document.hidden) live.src = `/live.jpg?t=${Date.now()}`;
+      else setTimeout(refreshLive, 1000);
+    }
+    live.addEventListener('load', () => {
+      live.hidden = false;
+      liveStatus.textContent = 'live';
+      setTimeout(refreshLive, 200);
+    });
+    live.addEventListener('error', () => {
+      live.hidden = true;
+      liveStatus.textContent = 'Camera unavailable; reconnecting…';
+      setTimeout(refreshLive, 1000);
+    });
+    refreshLive();
     const form = document.getElementById('form');
     const status = document.getElementById('status');
     const button = form.querySelector('button');
@@ -47,6 +78,10 @@
         const settings = await response.json();
         for (const [key, value] of Object.entries(settings)) {
           const input = form.elements.namedItem(key);
+          if (key === 'CAMERA_DEVICE') {
+            const devices = [...new Set([String(value), ...Array.from({length: 10}, (_, i) => String(i))])];
+            input.replaceChildren(...devices.map(device => new Option(device.startsWith('/dev/') ? device : `Camera ${device}`, device)));
+          }
           if (input.type === 'checkbox') input.checked = value;
           else input.value = value;
         }
@@ -61,6 +96,7 @@
       for (const input of form.querySelectorAll('input')) {
         settings[input.name] = input.type === 'checkbox' ? input.checked : Number(input.value);
       }
+      settings.CAMERA_DEVICE = form.elements.namedItem('CAMERA_DEVICE').value;
       try {
         const response = await fetch('/settings', {
           method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings)

@@ -20,7 +20,7 @@ class ConfigTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name) / '.env'
-        self.path.write_text('# keep me\nMIN_CAPTURE_INTERVAL=60 # interval\nUNRELATED=hello\nPORT=8080\n')
+        self.path.write_text('# keep me\nMIN_CAPTURE_INTERVAL=60 # interval\nUNRELATED=hello\nPORT=5418\n')
         self.store = ConfigStore(self.path)
 
     def test_validation(self):
@@ -38,6 +38,16 @@ class ConfigTests(unittest.TestCase):
         self.path.write_text('DETECTION_INTERVAL=-1')
         self.store.reload()
         self.assertEqual(before, self.store.snapshot())
+
+    def test_camera_selection(self):
+        for device in ('0', '9', '/dev/video2'):
+            self.store.update({'CAMERA_DEVICE': device})
+            self.assertEqual(device, load_config(self.path).CAMERA_DEVICE)
+        before = self.path.read_text()
+        for device in ('https://example.com', '../private', '0 # comment', -1, 10):
+            with self.assertRaises(ValueError):
+                self.store.update({'CAMERA_DEVICE': device})
+            self.assertEqual(before, self.path.read_text())
 
     def test_web_update_preserves_comments_and_other_keys(self):
         self.store.update({'MIN_CAPTURE_INTERVAL': 90, 'CAPTURE_ENABLED': False})
@@ -139,7 +149,8 @@ class HTTPTests(unittest.TestCase):
         self.store = ConfigStore(self.path)
         # Port zero is assigned by the OS, only for this test server.
         self.store._snapshot = replace(self.store.snapshot(), PORT=0)
-        self.server = make_server(self.store)
+        self.camera = Mock(preview_frame=None)
+        self.server = make_server(self.store, self.camera)
         thread = threading.Thread(target=self.server.serve_forever)
         thread.start()
         def cleanup():
@@ -175,7 +186,10 @@ class HTTPTests(unittest.TestCase):
         status, body, _ = self.request('GET', '/settings')
         self.assertEqual(200, status)
         self.assertNotIn('PHOTO_DIR', json.loads(body))
+        self.assertIn('CAMERA_DEVICE', json.loads(body))
         headers = {'Content-Type': 'application/json'}
+        self.assertEqual(200, self.request('POST', '/settings', '{"CAMERA_DEVICE": "1"}', headers)[0])
+        self.assertEqual('1', load_config(self.path).CAMERA_DEVICE)
         self.assertEqual(200, self.request('POST', '/settings', '{"EMPTY_TIMEOUT": 10}', headers)[0])
         self.assertEqual(10, load_config(self.path).EMPTY_TIMEOUT)
         for body in ('{"PORT": 1}', '{"EMPTY_TIMEOUT": -1}', '[]', 'invalid'):
@@ -183,6 +197,21 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(403, self.request('POST', '/settings', '{}')[0])
         self.assertEqual(403, self.request('POST', '/settings', '{}',
                          {**headers, 'Origin': 'http://evil.example'})[0])
+
+    def test_live_feed_and_unavailable_camera(self):
+        import cv2
+        import numpy as np
+        self.assertEqual(503, self.request('GET', '/live.jpg')[0])
+        frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+        self.camera.preview_frame = (time.monotonic(), frame)
+        status, body, headers = self.request('GET', '/live.jpg?t=1')
+        self.assertEqual(200, status)
+        self.assertEqual('image/jpeg', headers['Content-Type'])
+        self.assertEqual('no-store', headers['Cache-Control'])
+        decoded = cv2.imdecode(np.frombuffer(body, dtype=np.uint8), cv2.IMREAD_COLOR)
+        self.assertEqual((540, 960, 3), decoded.shape)
+        self.camera.preview_frame = (time.monotonic() - 4, frame)
+        self.assertEqual(503, self.request('GET', '/live.jpg')[0])
 
 
 class CameraTests(unittest.TestCase):

@@ -8,15 +8,17 @@ import logging
 from pathlib import Path
 import re
 import shutil
+import time
 from urllib.parse import quote, unquote, urlsplit
 
 from config import EDITABLE
+from camera import save_photo
 
 TEMPLATE = Path(__file__).parent / 'static/index.html'
 PHOTO_NAME = re.compile(r'^\d{8}_\d{6}(?:_[a-zA-Z0-9]+)?\.jpg$')
 
 
-def make_server(store):
+def make_server(store, camera=None):
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, body, content_type='application/json; charset=utf-8'):
             self.send_response(status)
@@ -30,7 +32,24 @@ def make_server(store):
         def do_GET(self):
             route = urlsplit(self.path).path
             config = store.snapshot()
-            if route == '/settings':
+            if route == '/live.jpg':
+                preview = camera.preview_frame if camera is not None else None
+                if preview is None or time.monotonic() - preview[0] > 3:
+                    self.send(503, b'{"error": "Camera unavailable"}')
+                    return
+                import cv2
+                try:
+                    frame = preview[1]
+                    height, width = frame.shape[:2]
+                    if width > 960:
+                        frame = cv2.resize(frame, (960, max(1, round(height * 960 / width))))
+                    ok, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 75])
+                    if not ok:
+                        raise ValueError('Unable to encode live frame')
+                    self.send(200, encoded.tobytes(), 'image/jpeg')
+                except (cv2.error, ValueError):
+                    self.send(503, b'{"error": "Live frame unavailable"}')
+            elif route == '/settings':
                 values = asdict(config)
                 self.send(200, json.dumps({key: values[key] for key in sorted(EDITABLE)}).encode())
             elif route == '/':
@@ -74,7 +93,7 @@ def make_server(store):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path != '/settings':
+            if self.path not in ('/settings', '/capture'):
                 self.send_error(404)
                 return
             # JSON-only writes prevent cross-origin HTML forms from changing settings.
@@ -92,6 +111,20 @@ def make_server(store):
                 updates = json.loads(self.rfile.read(length))
                 if not isinstance(updates, dict):
                     raise ValueError('Expected a settings object')
+                if self.path == '/capture':
+                    preview = camera.preview_frame if camera is not None else None
+                    if preview is None or time.monotonic() - preview[0] > 3:
+                        self.send(503, b'{"error": "Camera unavailable"}')
+                        return
+                    import cv2
+                    try:
+                        name = save_photo(preview[1], store.snapshot().PHOTO_DIR)
+                    except (OSError, cv2.error):
+                        logging.exception('Cannot save manual photograph')
+                        self.send(500, b'{"error": "Unable to save photo"}')
+                        return
+                    self.send(200, json.dumps({'url': '/photos/' + name}).encode())
+                    return
                 store.update(updates)
                 self.send(200, b'{"saved": true}')
             except (ValueError, UnicodeError, TimeoutError) as error:

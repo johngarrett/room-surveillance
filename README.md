@@ -2,9 +2,17 @@
 
 A local webcam takes occasional full-resolution JPEGs while a person is present.
 One Python process serves a plain HTML gallery and settings on your trusted LAN.
-No accounts, database, video, audio, face recognition, or cloud service.
+No accounts, database, recorded video, audio, face recognition, or cloud service.
+The live preview refreshes up to five times per second while the page is visible;
+it uses the same camera as detection and does not save preview images.
 
 ## Native setup (Python 3.12+)
+
+Run `./script/startup`. It creates the local Python environment and configuration
+on first use, defaults to camera 0 on macOS, and preserves existing settings.
+Allow camera access when prompted; Ctrl-C stops the app.
+
+Manual setup:
 
 ```sh
 python3.12 -m venv .venv
@@ -16,7 +24,7 @@ cp .env.example config/.env
 python main.py
 ```
 
-Open http://localhost:8080 or http://YOUR-LAN-IP:8080 from another device.
+Open http://localhost:5418 or http://YOUR-LAN-IP:5418 from another device.
 Allow camera access for your terminal on macOS. Use native execution on macOS;
 Docker Desktop does not provide the Linux webcam passthrough used here.
 The first native launch downloads `yolo11n.pt` into the working directory;
@@ -31,12 +39,16 @@ frame at the negotiated camera resolution. Verify resolution on your hardware.
 ```sh
 mkdir -p config photos
 cp .env.example config/.env
-# Confirm CAMERA_DEVICE=/dev/video0, PHOTO_DIR=./photos, PORT=8080.
+# Confirm CAMERA_DEVICE=/dev/video0, PHOTO_DIR=./photos, PORT=5418.
 docker compose up --build -d
 docker compose logs -f
 ```
 
 The build installs CPU PyTorch and packages YOLO11 nano weights in the image.
+The base image is pinned by digest, Python dependency versions are constrained by
+`requirements-docker.lock`, and the model checksum is verified during the build.
+Update these deliberately when upgrading. Debian package repositories are not
+snapshotted; deploy the same built image digest across machines for identical artifacts.
 A network connection is required for building, but not for normal startup.
 Photos and configuration are bind mounted from `./photos` and `./config` and
 survive container rebuilds. Back them up yourself. Nothing deletes old photos.
@@ -66,14 +78,16 @@ mounted so editor atomic replacements remain visible inside Docker.
 | MIN_CAPTURE_INTERVAL | 60 | Minimum seconds between photos |
 | MAX_CAPTURE_INTERVAL | 300 | Maximum seconds between photos |
 | PHOTO_DIR | ./photos | Output directory |
-| PORT | 8080 | HTTP port; restart required to change |
+| PORT | 5418 | HTTP port; restart required to change |
 
 Positive intervals are limited to 86400 seconds; empty timeout allows 0–86400.
 Minimum capture interval cannot exceed maximum. Invalid edits keep the previous
 valid snapshot and log a warning. Invalid startup configuration fails clearly.
 Missing keys use defaults. Edit settings through the small `settings` disclosure
-or a text editor. Web settings only permit capture/detection values, never paths,
-camera devices, ports, or unrelated keys. Writes are validated and atomic and
+or a text editor. Web settings permit camera selection and capture/detection values, never storage paths,
+ports, or unrelated keys. The camera dropdown selects indices 0–9 and preserves
+the configured device as an option; save to switch without restarting. Numbered
+choices are not a list of detected cameras. Writes are validated and atomic and
 preserve comments and unrelated settings. Avoid simultaneous web/editor saves:
 as with ordinary files, the last writer wins.
 
@@ -83,7 +97,7 @@ occupancy; photo directory changes affect subsequent saves and gallery requests.
 A bad/unwritable photo directory logs save failures without deleting old photos.
 Changing directories leaves existing images in their original location. Port
 changes require restarting; Docker also requires a matching Compose port mapping.
-Keep port 8080 in the initial Docker deployment.
+Keep port 5418 in the initial Docker deployment.
 
 Two consecutive positive detections establish occupancy. Vacancy cancels the
 schedule. Re-enabling photography or changing interval bounds starts a new

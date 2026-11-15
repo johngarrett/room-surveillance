@@ -14,7 +14,7 @@ from dotenv.parser import parse_stream
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
-EDITABLE = {'CAPTURE_ENABLED', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL',
+EDITABLE = {'CAMERA_DEVICE', 'CAPTURE_ENABLED', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL',
             'DETECTION_INTERVAL', 'PERSON_CONFIDENCE', 'EMPTY_TIMEOUT'}
 
 
@@ -28,7 +28,7 @@ class Config:
     MIN_CAPTURE_INTERVAL: float = 60
     MAX_CAPTURE_INTERVAL: float = 300
     PHOTO_DIR: Path = Path('./photos')
-    PORT: int = 8080
+    PORT: int = 5418
 
 
 def load_config(path: Path) -> Config:
@@ -116,10 +116,12 @@ class ConfigStore(FileSystemEventHandler):
 
     def update(self, updates: dict):
         if not updates or not updates.keys() <= EDITABLE:
-            raise ValueError('Only supported capture and detection settings may be updated')
+            raise ValueError('Only supported camera, capture and detection settings may be updated')
         if any(not isinstance(value, (str, int, float, bool)) for value in updates.values()):
             raise ValueError('Settings must be scalar values')
         with self.lock:
+            if 'CAMERA_DEVICE' in updates and not re.fullmatch(r'[0-9]|/dev/video[0-9]+', str(updates['CAMERA_DEVICE'])):
+                raise ValueError('Choose a camera index from 0 to 9 or a /dev/video device')
             content = self.path.read_text()
             for key, value in updates.items():
                 value = str(value).lower() if isinstance(value, bool) else str(value)

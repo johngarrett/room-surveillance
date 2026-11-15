@@ -23,17 +23,15 @@ def main():
     try:
         store = ConfigStore(Path('config/.env'))
         detector = Detector()
-        server = make_server(store)
+        camera = CameraWorker(store, detector, stop)
+        server = make_server(store, camera)
         store.start()
         watching = True
-        camera = CameraWorker(store, detector, stop)
-        camera.start()
         http_thread = threading.Thread(target=server.serve_forever, name='http')
         http_thread.start()
         logging.info('Gallery listening on port %s', server.server_port)
-        while not stop.wait(1):
-            if not camera.is_alive():
-                raise RuntimeError('Camera worker stopped unexpectedly')
+        # macOS camera permission requests require the main thread.
+        camera.run()
     except Exception:
         logging.exception('Application failed')
         return 1
