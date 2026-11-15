@@ -24,6 +24,7 @@ class Config:
     CAMERA_WIDTH: int = 1920
     CAMERA_HEIGHT: int = 1080
     CAMERA_FORMAT: str = 'MJPG'
+    CAMERA_CYCLE_ENABLED: bool = False
     DETECTION_INTERVAL: float = 3
     PERSON_CONFIDENCE: float = .5
     EMPTY_TIMEOUT: float = 30
@@ -48,9 +49,9 @@ def load_config(path: Path) -> Config:
         value = values[key]
         if value is None or not value.strip():
             raise ValueError(f'{key} must not be empty')
-        if key == 'CAPTURE_ENABLED':
+        if key in ('CAPTURE_ENABLED', 'CAMERA_CYCLE_ENABLED'):
             if value.lower() not in ('true', 'false'):
-                raise ValueError('CAPTURE_ENABLED must be true or false')
+                raise ValueError(f'{key} must be true or false')
             defaults[key] = value.lower() == 'true'
         elif key in ('PORT', 'CAMERA_WIDTH', 'CAMERA_HEIGHT'):
             defaults[key] = int(value)

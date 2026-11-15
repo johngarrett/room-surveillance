@@ -88,6 +88,7 @@ mounted so editor atomic replacements remain visible inside Docker.
 | CAMERA_WIDTH | 1920 | Requested photo width in pixels, 1–16384 |
 | CAMERA_HEIGHT | 1080 | Requested photo height in pixels, 1–16384 |
 | CAMERA_FORMAT | MJPG | Four-character Linux capture format code; MJPG means MJPEG |
+| CAMERA_CYCLE_ENABLED | false | Workaround: alternate 20 seconds streaming with 20 seconds released |
 | DETECTION_INTERVAL | 3 | Seconds between inference checks |
 | PERSON_CONFIDENCE | 0.5 | Person confidence threshold, 0–1 |
 | EMPTY_TIMEOUT | 30 | Seconds since last positive detection before vacancy |
@@ -98,6 +99,12 @@ mounted so editor atomic replacements remain visible inside Docker.
 | PORT | 5418 | HTTP port; restart required to change |
 
 Positive intervals are limited to 86400 seconds; empty timeout allows 0–86400.
+Set `CAMERA_CYCLE_ENABLED=true` in `config/.env` to try periodic camera restarts.
+Live preview, detection, and manual photos are unavailable during each pause.
+Photo deadlines survive planned pauses; a due photo still needs a fresh person
+detection after reopening. Shutdown interrupts the pause immediately. This releases
+the camera driver without cutting USB power. It cannot interrupt a blocked native
+camera call, and is an experimental workaround rather than a confirmed USB fix.
 Minimum capture interval cannot exceed maximum. Invalid edits keep the previous
 valid snapshot and log a warning. Invalid startup configuration fails clearly.
 Missing keys use defaults. Edit settings through the small `settings` disclosure
@@ -119,7 +126,8 @@ schedule. Re-enabling photography or changing interval bounds starts a new
 random interval. A due capture requires a positive detection in that very frame;
 otherwise it waits. Inference-cycle precision is sufficient: photographs can be
 delayed by one detection interval plus inference time. Pauses never produce a
-catch-up burst. Camera read failures reset occupancy and retry after 3 seconds.
+catch-up burst. Camera read failures reset occupancy and retry after 3 seconds
+(20 seconds with camera cycling enabled).
 
 Photos use local timestamps, with a unique suffix, e.g.
 `20261111_102305_a1b2c3d4.jpg`. The gallery sorts these names newest first, loads

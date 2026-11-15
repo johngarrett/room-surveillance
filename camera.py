@@ -55,6 +55,8 @@ class CameraWorker(threading.Thread):
         capture = None
         device = None
         camera_settings = None
+        stream_started = 0
+        cycling = False
         occupancy = Occupancy()
         scheduler = Scheduler()
         next_detection = 0
@@ -66,12 +68,23 @@ class CameraWorker(threading.Thread):
                 changed = config != previous_config
                 previous_config = config
                 settings = (config.CAMERA_DEVICE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT)
+                if capture is not None and config.CAMERA_CYCLE_ENABLED and time.monotonic() - stream_started >= 20:
+                    self.preview_frame = None
+                    capture.release()
+                    capture = None
+                    cycling = True
+                    logging.info('Camera cycle: released camera; paused for 20 seconds')
+                    self.stop_event.wait(20)
+                    continue
                 if capture is None or settings != camera_settings:
                     self.preview_frame = None
                     if capture is not None:
                         capture.release()
-                    occupancy = Occupancy()
-                    scheduler = Scheduler()
+                    # Keep photo deadlines across planned pauses, even when intervals exceed 20 seconds.
+                    if not cycling or settings != camera_settings:
+                        occupancy = Occupancy()
+                        scheduler = Scheduler()
+                    cycling = False
                     device = config.CAMERA_DEVICE
                     camera_settings = settings
                     source = int(device) if device.isdecimal() else device
@@ -86,13 +99,17 @@ class CameraWorker(threading.Thread):
                                  config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT,
                                  capture.get(cv2.CAP_PROP_FRAME_WIDTH), capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     next_detection = 0
+                    stream_started = time.monotonic()
+                    if config.CAMERA_CYCLE_ENABLED:
+                        logging.info('Camera cycle: streaming for 20 seconds')
                 ok, frame = capture.read()
                 if not ok:
                     self.preview_frame = None
-                    logging.warning('Camera unavailable: %s; retrying in 3 seconds', device)
+                    retry_delay = 20 if config.CAMERA_CYCLE_ENABLED else 3
+                    logging.warning('Camera unavailable: %s; retrying in %s seconds', device, retry_delay)
                     capture.release()
                     capture = None
-                    self.stop_event.wait(3)
+                    self.stop_event.wait(retry_delay)
                     continue
                 now = time.monotonic()
                 self.preview_frame = (now, frame)

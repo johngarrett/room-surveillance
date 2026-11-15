@@ -28,7 +28,8 @@ class ConfigTests(unittest.TestCase):
                      'PERSON_CONFIDENCE=nan', 'EMPTY_TIMEOUT=inf',
                      'CAPTURE_ENABLED=yes', 'PORT=0', 'MAX_CAPTURE_INTERVAL=nan',
                      'PERSON_CONFIDENCE="unterminated', 'CAMERA_WIDTH=0',
-                     'CAMERA_HEIGHT=16385', 'CAMERA_WIDTH=1.5', 'CAMERA_FORMAT=MJPEG'):
+                     'CAMERA_HEIGHT=16385', 'CAMERA_WIDTH=1.5', 'CAMERA_FORMAT=MJPEG',
+                     'CAMERA_CYCLE_ENABLED=yes'):
             with self.subTest(text=text):
                 self.path.write_text(text)
                 with self.assertRaises(ValueError):
@@ -40,6 +41,11 @@ class ConfigTests(unittest.TestCase):
         self.path.write_text('CAMERA_WIDTH=1280\nCAMERA_HEIGHT=720\nCAMERA_FORMAT=YUYV\n')
         config = load_config(self.path)
         self.assertEqual((1280, 720, 'YUYV'), (config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT))
+
+    def test_camera_cycling_is_opt_in(self):
+        self.assertFalse(load_config(self.path).CAMERA_CYCLE_ENABLED)
+        self.path.write_text('CAMERA_CYCLE_ENABLED=true\n')
+        self.assertTrue(load_config(self.path).CAMERA_CYCLE_ENABLED)
 
     def test_invalid_reload_keeps_snapshot(self):
         before = self.store.snapshot()
@@ -237,6 +243,81 @@ class HTTPTests(unittest.TestCase):
 
 
 class CameraTests(unittest.TestCase):
+    def test_planned_cycle_preserves_photo_deadline(self):
+        import cv2
+        import numpy as np
+        from camera import CameraWorker
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            store = Mock()
+            store.snapshot.return_value = replace(Config(), CAMERA_CYCLE_ENABLED=True,
+                PHOTO_DIR=Path(directory), DETECTION_INTERVAL=1,
+                MIN_CAPTURE_INTERVAL=30, MAX_CAPTURE_INTERVAL=30)
+            store.changed = threading.Event()
+            stop = threading.Event()
+            frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
+            capture = Mock()
+            def read():
+                if capture.read.call_count == 3:
+                    stop.set()
+                return True, frame
+            capture.read.side_effect = read
+            detector = Mock()
+            detector.has_person.return_value = True
+            worker = CameraWorker(store, detector, stop)
+            def pause(seconds):
+                self.assertEqual(20, seconds)
+                self.assertIsNone(worker.preview_frame)
+                self.assertEqual(1, capture.release.call_count)
+                self.assertEqual([], list(Path(directory).glob('*.jpg')))
+            with patch('cv2.VideoCapture', return_value=capture) as open_camera, \
+                    patch('camera.time.monotonic', side_effect=[0, 1, 2, 2, 21, 41, 42, 42]), \
+                    patch.object(stop, 'wait', side_effect=pause) as wait:
+                worker.run()
+            wait.assert_called_once_with(20)
+            self.assertEqual(2, open_camera.call_count)
+            self.assertEqual(2, capture.release.call_count)
+            photos = list(Path(directory).glob('*.jpg'))
+            self.assertEqual(1, len(photos))
+            self.assertEqual(frame.shape, cv2.imread(str(photos[0])).shape)
+            self.assertIsNone(worker.preview_frame)
+
+    def test_stop_during_cycle_pause_does_not_reopen(self):
+        from camera import CameraWorker
+        from unittest.mock import patch
+        store = Mock()
+        store.snapshot.return_value = replace(Config(), CAMERA_CYCLE_ENABLED=True)
+        store.changed = threading.Event()
+        stop = threading.Event()
+        capture = Mock()
+        capture.read.return_value = (True, object())
+        detector = Mock()
+        detector.has_person.return_value = False
+        with patch('cv2.VideoCapture', return_value=capture) as open_camera, \
+                patch('camera.time.monotonic', side_effect=[0, 1, 21]), \
+                patch.object(stop, 'wait', side_effect=lambda _: stop.set()) as wait:
+            CameraWorker(store, detector, stop).run()
+        wait.assert_called_once_with(20)
+        open_camera.assert_called_once()
+        capture.release.assert_called_once()
+
+    def test_failed_capture_uses_cycle_pause_only_when_enabled(self):
+        from camera import CameraWorker
+        from unittest.mock import patch
+        for enabled, delay in ((False, 3), (True, 20)):
+            with self.subTest(enabled=enabled):
+                store = Mock()
+                store.snapshot.return_value = replace(Config(), CAMERA_CYCLE_ENABLED=enabled)
+                store.changed = threading.Event()
+                stop = threading.Event()
+                capture = Mock()
+                capture.read.return_value = (False, None)
+                with patch('cv2.VideoCapture', return_value=capture), \
+                        patch.object(stop, 'wait', side_effect=lambda _: stop.set()) as wait:
+                    CameraWorker(store, Mock(), stop).run()
+                wait.assert_called_once_with(delay)
+                capture.release.assert_called_once()
+
     def test_camera_mode_changes_reopen_device(self):
         from camera import CameraWorker
         from unittest.mock import patch
