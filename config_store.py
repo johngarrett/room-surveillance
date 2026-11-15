@@ -24,6 +24,7 @@ class Config:
     CAMERA_WIDTH: int = 1920
     CAMERA_HEIGHT: int = 1080
     CAMERA_FORMAT: str = 'MJPG'
+    CAMERA_FPS: int = 25
     CAMERA_CYCLE_ENABLED: bool = False
     DETECTION_INTERVAL: float = 3
     PERSON_CONFIDENCE: float = .5
@@ -53,7 +54,7 @@ def load_config(path: Path) -> Config:
             if value.lower() not in ('true', 'false'):
                 raise ValueError(f'{key} must be true or false')
             defaults[key] = value.lower() == 'true'
-        elif key in ('PORT', 'CAMERA_WIDTH', 'CAMERA_HEIGHT'):
+        elif key in ('PORT', 'CAMERA_WIDTH', 'CAMERA_HEIGHT', 'CAMERA_FPS'):
             defaults[key] = int(value)
         elif key == 'PHOTO_DIR':
             defaults[key] = Path(value).expanduser().resolve()
@@ -67,6 +68,8 @@ def load_config(path: Path) -> Config:
             raise ValueError(f'{key} must be between 1 and 16384')
     if not re.fullmatch(r'[A-Z0-9]{4}', config.CAMERA_FORMAT):
         raise ValueError('CAMERA_FORMAT must be a four-character format code, e.g. MJPG')
+    if not 1 <= config.CAMERA_FPS <= 240:
+        raise ValueError('CAMERA_FPS must be between 1 and 240')
     for key in ('DETECTION_INTERVAL', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL'):
         value = getattr(config, key)
         if not math.isfinite(value) or not 0 < value <= 86400:

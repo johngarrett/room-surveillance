@@ -29,7 +29,7 @@ class ConfigTests(unittest.TestCase):
                      'CAPTURE_ENABLED=yes', 'PORT=0', 'MAX_CAPTURE_INTERVAL=nan',
                      'PERSON_CONFIDENCE="unterminated', 'CAMERA_WIDTH=0',
                      'CAMERA_HEIGHT=16385', 'CAMERA_WIDTH=1.5', 'CAMERA_FORMAT=MJPEG',
-                     'CAMERA_CYCLE_ENABLED=yes'):
+                     'CAMERA_CYCLE_ENABLED=yes', 'CAMERA_FPS=0', 'CAMERA_FPS=241', 'CAMERA_FPS=1.5'):
             with self.subTest(text=text):
                 self.path.write_text(text)
                 with self.assertRaises(ValueError):
@@ -38,9 +38,11 @@ class ConfigTests(unittest.TestCase):
     def test_camera_mode_configuration(self):
         config = load_config(self.path)
         self.assertEqual((1920, 1080, 'MJPG'), (config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT))
-        self.path.write_text('CAMERA_WIDTH=1280\nCAMERA_HEIGHT=720\nCAMERA_FORMAT=YUYV\n')
+        self.assertEqual(25, config.CAMERA_FPS)
+        self.path.write_text('CAMERA_WIDTH=1280\nCAMERA_HEIGHT=720\nCAMERA_FORMAT=YUYV\nCAMERA_FPS=20\n')
         config = load_config(self.path)
         self.assertEqual((1280, 720, 'YUYV'), (config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT))
+        self.assertEqual(20, config.CAMERA_FPS)
 
     def test_camera_cycling_is_opt_in(self):
         self.assertFalse(load_config(self.path).CAMERA_CYCLE_ENABLED)
@@ -252,7 +254,7 @@ class CameraTests(unittest.TestCase):
             store = Mock()
             store.snapshot.return_value = replace(Config(), CAMERA_CYCLE_ENABLED=True,
                 PHOTO_DIR=Path(directory), DETECTION_INTERVAL=1,
-                MIN_CAPTURE_INTERVAL=30, MAX_CAPTURE_INTERVAL=30)
+                MIN_CAPTURE_INTERVAL=20, MAX_CAPTURE_INTERVAL=20)
             store.changed = threading.Event()
             stop = threading.Event()
             frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
@@ -271,7 +273,7 @@ class CameraTests(unittest.TestCase):
                 self.assertEqual(1, capture.release.call_count)
                 self.assertEqual([], list(Path(directory).glob('*.jpg')))
             with patch('cv2.VideoCapture', return_value=capture) as open_camera, \
-                    patch('camera.time.monotonic', side_effect=[0, 1, 2, 2, 21, 41, 42, 42]), \
+                    patch('camera.time.monotonic', side_effect=[0, 1, 2, 2, 5, 25, 26, 26]), \
                     patch.object(stop, 'wait', side_effect=pause) as wait:
                 worker.run()
             wait.assert_called_once_with(20)
@@ -294,7 +296,7 @@ class CameraTests(unittest.TestCase):
         detector = Mock()
         detector.has_person.return_value = False
         with patch('cv2.VideoCapture', return_value=capture) as open_camera, \
-                patch('camera.time.monotonic', side_effect=[0, 1, 21]), \
+                patch('camera.time.monotonic', side_effect=[0, 1, 5]), \
                 patch.object(stop, 'wait', side_effect=lambda _: stop.set()) as wait:
             CameraWorker(store, detector, stop).run()
         wait.assert_called_once_with(20)
@@ -313,17 +315,19 @@ class CameraTests(unittest.TestCase):
                 capture = Mock()
                 capture.read.return_value = (False, None)
                 with patch('cv2.VideoCapture', return_value=capture), \
-                        patch.object(stop, 'wait', side_effect=lambda _: stop.set()) as wait:
+                        patch.object(stop, 'wait', side_effect=lambda _: stop.set()) as wait, \
+                        self.assertLogs(level='INFO') as logs:
                     CameraWorker(store, Mock(), stop).run()
                 wait.assert_called_once_with(delay)
                 capture.release.assert_called_once()
+                self.assertFalse(any('streaming window active' in line for line in logs.output))
 
     def test_camera_mode_changes_reopen_device(self):
         from camera import CameraWorker
         from unittest.mock import patch
         store = Mock()
         config = Config()
-        changed = replace(config, CAMERA_WIDTH=1280, CAMERA_HEIGHT=720, CAMERA_FORMAT='YUYV')
+        changed = replace(config, CAMERA_FPS=20)
         store.snapshot.side_effect = [config, changed]
         store.changed = threading.Event()
         stop = threading.Event()
@@ -401,7 +405,8 @@ class CameraTests(unittest.TestCase):
                 call(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG')),
                 call(cv2.CAP_PROP_FRAME_WIDTH, 1920),
                 call(cv2.CAP_PROP_FRAME_HEIGHT, 1080),
-            ], capture.set.call_args_list[:3])
+                call(cv2.CAP_PROP_FPS, 25),
+            ], capture.set.call_args_list[:4])
             self.assertEqual(sum(positives), sum('PERSON detected' in line for line in logs.output))
             self.assertEqual(len(positives) - sum(positives), sum('PERSON not detected' in line for line in logs.output))
             photos = list(Path(directory).glob('*.jpg'))

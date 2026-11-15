@@ -32,7 +32,7 @@ Docker Desktop does not provide the Linux webcam passthrough used here.
 The first native launch downloads `yolo11n.pt` into the working directory;
 subsequent launches reuse it. Keep it there for offline operation.
 
-The camera defaults to 1920×1080 and requests MJPEG (`MJPG`) on Linux before
+The camera defaults to 1920×1080 at 25 fps and requests MJPEG (`MJPG`) on Linux before
 setting resolution. macOS chooses its native capture format. Configure these in
 `config/.env`; mode changes reopen the camera automatically. The driver can
 negotiate another resolution; startup logs show the requested and negotiated size.
@@ -88,7 +88,8 @@ mounted so editor atomic replacements remain visible inside Docker.
 | CAMERA_WIDTH | 1920 | Requested photo width in pixels, 1–16384 |
 | CAMERA_HEIGHT | 1080 | Requested photo height in pixels, 1–16384 |
 | CAMERA_FORMAT | MJPG | Four-character Linux capture format code; MJPG means MJPEG |
-| CAMERA_CYCLE_ENABLED | false | Workaround: alternate 20 seconds streaming with 20 seconds released |
+| CAMERA_FPS | 25 | Requested capture frame rate, 1–240; must be supported by the camera |
+| CAMERA_CYCLE_ENABLED | false | Workaround: alternate 5 seconds streaming with 20 seconds released |
 | DETECTION_INTERVAL | 3 | Seconds between inference checks |
 | PERSON_CONFIDENCE | 0.5 | Person confidence threshold, 0–1 |
 | EMPTY_TIMEOUT | 30 | Seconds since last positive detection before vacancy |

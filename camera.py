@@ -57,6 +57,7 @@ class CameraWorker(threading.Thread):
         camera_settings = None
         stream_started = 0
         cycling = False
+        stream_announced = False
         occupancy = Occupancy()
         scheduler = Scheduler()
         next_detection = 0
@@ -67,8 +68,8 @@ class CameraWorker(threading.Thread):
                 config = self.store.snapshot()
                 changed = config != previous_config
                 previous_config = config
-                settings = (config.CAMERA_DEVICE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT)
-                if capture is not None and config.CAMERA_CYCLE_ENABLED and time.monotonic() - stream_started >= 20:
+                settings = (config.CAMERA_DEVICE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT, config.CAMERA_FPS)
+                if capture is not None and config.CAMERA_CYCLE_ENABLED and time.monotonic() - stream_started >= 5:
                     self.preview_frame = None
                     capture.release()
                     capture = None
@@ -80,7 +81,7 @@ class CameraWorker(threading.Thread):
                     self.preview_frame = None
                     if capture is not None:
                         capture.release()
-                    # Keep photo deadlines across planned pauses, even when intervals exceed 20 seconds.
+                    # Keep photo deadlines across planned pauses, even when intervals exceed the streaming window.
                     if not cycling or settings != camera_settings:
                         occupancy = Occupancy()
                         scheduler = Scheduler()
@@ -94,14 +95,15 @@ class CameraWorker(threading.Thread):
                         capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FORMAT))
                     capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
                     capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
+                    capture.set(cv2.CAP_PROP_FPS, config.CAMERA_FPS)
                     capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                    logging.info('Camera mode: requested %sx%s %s; negotiated %sx%s',
-                                 config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT,
-                                 capture.get(cv2.CAP_PROP_FRAME_WIDTH), capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    logging.info('Camera mode: requested %sx%s %s at %s fps; negotiated %sx%s at %s fps',
+                                 config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT, config.CAMERA_FPS,
+                                 capture.get(cv2.CAP_PROP_FRAME_WIDTH), capture.get(cv2.CAP_PROP_FRAME_HEIGHT),
+                                 capture.get(cv2.CAP_PROP_FPS))
                     next_detection = 0
                     stream_started = time.monotonic()
-                    if config.CAMERA_CYCLE_ENABLED:
-                        logging.info('Camera cycle: streaming for 20 seconds')
+                    stream_announced = False
                 ok, frame = capture.read()
                 if not ok:
                     self.preview_frame = None
@@ -112,6 +114,9 @@ class CameraWorker(threading.Thread):
                     self.stop_event.wait(retry_delay)
                     continue
                 now = time.monotonic()
+                if config.CAMERA_CYCLE_ENABLED and not stream_announced:
+                    logging.info('Camera cycle: first frame received; streaming window active')
+                    stream_announced = True
                 self.preview_frame = (now, frame)
                 if changed:
                     next_detection = now
