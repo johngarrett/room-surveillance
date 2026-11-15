@@ -1,0 +1,32 @@
+#!/bin/sh
+set -eu
+
+if [ "$(uname -s)" != Linux ]; then
+    echo 'Run this on the Linux deployment host to discover /dev/video devices.' >&2
+    echo 'Native macOS uses numeric camera indices, usually CAMERA_DEVICE=0.' >&2
+    exit 1
+fi
+
+found=false
+for entry in /sys/class/video4linux/video*; do
+    [ -e "$entry" ] || continue
+    device="/dev/${entry##*/}"
+    [ -c "$device" ] || continue
+    found=true
+    printf '\n%s — %s\n' "$device" "$(cat "$entry/name")"
+    printf '  config/.env: CAMERA_DEVICE=%s\n' "$device"
+    printf '  compose.yaml devices: - "%s:%s"\n' "$device" "$device"
+done
+
+if [ "$found" = false ]; then
+    echo 'No camera devices found. Connect a camera and run this on the Linux host.' >&2
+    exit 1
+fi
+
+printf '\nSome cameras expose multiple nodes, including metadata nodes.\n'
+if command -v v4l2-ctl >/dev/null 2>&1; then
+    printf 'Video4Linux device details:\n'
+    v4l2-ctl --list-devices
+else
+    printf 'Use v4l2-ctl --device=/dev/videoN --all to check capture capabilities (v4l-utils).\n'
+fi

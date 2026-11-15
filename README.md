@@ -38,6 +38,13 @@ frame at the negotiated camera resolution. Verify resolution on your hardware.
 
 ## Linux Docker
 
+On the Linux host, run `./script/cameras` to list attached camera names, device
+paths, and matching config/Compose settings. Run it outside Docker so it can see
+all host cameras. Some webcams expose metadata nodes as well as capture nodes;
+use `v4l2-ctl --device=/dev/videoN --all` to check for video capture capability.
+The website can switch only among devices available to the process. Docker must
+map every camera you want to use; changing the dropdown cannot add a device mapping.
+
 ```sh
 mkdir -p config photos
 cp .env.example config/.env

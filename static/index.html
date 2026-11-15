@@ -37,7 +37,7 @@
     <summary>settings</summary>
     <form id="form">
       <label>camera <select name="CAMERA_DEVICE" aria-describedby="camera-help" required></select></label>
-      <p class="help" id="camera-help">0 is usually the default. Save to switch.</p>
+      <p class="help" id="camera-help">Save to switch. Docker requires the selected device to be mapped.</p>
       <label>capture enabled <input name="CAPTURE_ENABLED" type="checkbox" aria-describedby="capture-help"></label>
       <p class="help" id="capture-help">Automatically save photos when people are present.</p>
       <label>minimum interval (seconds) <input name="MIN_CAPTURE_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="minimum-help" required></label>
