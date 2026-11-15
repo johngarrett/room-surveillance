@@ -27,11 +27,19 @@ class ConfigTests(unittest.TestCase):
         for text in ('DETECTION_INTERVAL=0', 'MIN_CAPTURE_INTERVAL=500',
                      'PERSON_CONFIDENCE=nan', 'EMPTY_TIMEOUT=inf',
                      'CAPTURE_ENABLED=yes', 'PORT=0', 'MAX_CAPTURE_INTERVAL=nan',
-                     'PERSON_CONFIDENCE="unterminated'):
+                     'PERSON_CONFIDENCE="unterminated', 'CAMERA_WIDTH=0',
+                     'CAMERA_HEIGHT=16385', 'CAMERA_WIDTH=1.5', 'CAMERA_FORMAT=MJPEG'):
             with self.subTest(text=text):
                 self.path.write_text(text)
                 with self.assertRaises(ValueError):
                     load_config(self.path)
+
+    def test_camera_mode_configuration(self):
+        config = load_config(self.path)
+        self.assertEqual((1920, 1080, 'MJPG'), (config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT))
+        self.path.write_text('CAMERA_WIDTH=1280\nCAMERA_HEIGHT=720\nCAMERA_FORMAT=YUYV\n')
+        config = load_config(self.path)
+        self.assertEqual((1280, 720, 'YUYV'), (config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT))
 
     def test_invalid_reload_keeps_snapshot(self):
         before = self.store.snapshot()
@@ -229,6 +237,29 @@ class HTTPTests(unittest.TestCase):
 
 
 class CameraTests(unittest.TestCase):
+    def test_camera_mode_changes_reopen_device(self):
+        from camera import CameraWorker
+        from unittest.mock import patch
+        store = Mock()
+        config = Config()
+        changed = replace(config, CAMERA_WIDTH=1280, CAMERA_HEIGHT=720, CAMERA_FORMAT='YUYV')
+        store.snapshot.side_effect = [config, changed]
+        store.changed = threading.Event()
+        stop = threading.Event()
+        capture = Mock()
+        def read():
+            if capture.read.call_count == 2:
+                stop.set()
+                return False, None
+            return True, object()
+        capture.read.side_effect = read
+        detector = Mock()
+        detector.has_person.return_value = False
+        with patch('cv2.VideoCapture', return_value=capture) as open_camera:
+            CameraWorker(store, detector, stop).run()
+        self.assertEqual(2, open_camera.call_count)
+        self.assertEqual(2, capture.release.call_count)
+
     def test_failed_encoding_does_not_kill_worker(self):
         import cv2
         from camera import CameraWorker
@@ -270,7 +301,7 @@ class CameraTests(unittest.TestCase):
             store.changed = threading.Event()
             stop = threading.Event()
             now = [-1]
-            frame = np.zeros((480, 640, 3), dtype=np.uint8)
+            frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
             positives = [True, True, False, True, True, False, True, True, True, True]
             def read():
                 now[0] += 1
@@ -282,8 +313,14 @@ class CameraTests(unittest.TestCase):
             capture.read.side_effect = read
             detector = Mock()
             detector.has_person.side_effect = positives
-            with patch('cv2.VideoCapture', return_value=capture), patch('camera.time.monotonic', side_effect=lambda: now[0]), self.assertLogs(level='INFO') as logs:
+            with patch('cv2.VideoCapture', return_value=capture), patch('camera.platform.system', return_value='Linux'), patch('camera.time.monotonic', side_effect=lambda: now[0]), self.assertLogs(level='INFO') as logs:
                 CameraWorker(store, detector, stop).run()
+            from unittest.mock import call
+            self.assertEqual([
+                call(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG')),
+                call(cv2.CAP_PROP_FRAME_WIDTH, 1920),
+                call(cv2.CAP_PROP_FRAME_HEIGHT, 1080),
+            ], capture.set.call_args_list[:3])
             self.assertEqual(sum(positives), sum('PERSON detected' in line for line in logs.output))
             self.assertEqual(len(positives) - sum(positives), sum('PERSON not detected' in line for line in logs.output))
             photos = list(Path(directory).glob('*.jpg'))

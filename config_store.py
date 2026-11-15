@@ -21,6 +21,9 @@ EDITABLE = {'CAPTURE_ENABLED', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL',
 @dataclass(frozen=True)
 class Config:
     CAMERA_DEVICE: str = '/dev/video0'
+    CAMERA_WIDTH: int = 1920
+    CAMERA_HEIGHT: int = 1080
+    CAMERA_FORMAT: str = 'MJPG'
     DETECTION_INTERVAL: float = 3
     PERSON_CONFIDENCE: float = .5
     EMPTY_TIMEOUT: float = 30
@@ -49,15 +52,20 @@ def load_config(path: Path) -> Config:
             if value.lower() not in ('true', 'false'):
                 raise ValueError('CAPTURE_ENABLED must be true or false')
             defaults[key] = value.lower() == 'true'
-        elif key == 'PORT':
+        elif key in ('PORT', 'CAMERA_WIDTH', 'CAMERA_HEIGHT'):
             defaults[key] = int(value)
         elif key == 'PHOTO_DIR':
             defaults[key] = Path(value).expanduser().resolve()
-        elif key == 'CAMERA_DEVICE':
+        elif key in ('CAMERA_DEVICE', 'CAMERA_FORMAT'):
             defaults[key] = value
         else:
             defaults[key] = float(value)
     config = Config(**defaults)
+    for key in ('CAMERA_WIDTH', 'CAMERA_HEIGHT'):
+        if not 1 <= getattr(config, key) <= 16384:
+            raise ValueError(f'{key} must be between 1 and 16384')
+    if not re.fullmatch(r'[A-Z0-9]{4}', config.CAMERA_FORMAT):
+        raise ValueError('CAMERA_FORMAT must be a four-character format code, e.g. MJPG')
     for key in ('DETECTION_INTERVAL', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL'):
         value = getattr(config, key)
         if not math.isfinite(value) or not 0 < value <= 86400:

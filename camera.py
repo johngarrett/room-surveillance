@@ -54,6 +54,7 @@ class CameraWorker(threading.Thread):
         import cv2
         capture = None
         device = None
+        camera_settings = None
         occupancy = Occupancy()
         scheduler = Scheduler()
         next_detection = 0
@@ -64,19 +65,26 @@ class CameraWorker(threading.Thread):
                 config = self.store.snapshot()
                 changed = config != previous_config
                 previous_config = config
-                if capture is None or device != config.CAMERA_DEVICE:
+                settings = (config.CAMERA_DEVICE, config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT)
+                if capture is None or settings != camera_settings:
                     self.preview_frame = None
                     if capture is not None:
                         capture.release()
                     occupancy = Occupancy()
                     scheduler = Scheduler()
                     device = config.CAMERA_DEVICE
+                    camera_settings = settings
                     source = int(device) if device.isdecimal() else device
                     backend = cv2.CAP_AVFOUNDATION if platform.system() == 'Darwin' else cv2.CAP_V4L2
                     capture = cv2.VideoCapture(source, backend)
-                    capture.set(cv2.CAP_PROP_FRAME_WIDTH, 4096)
-                    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 2160)
+                    if backend == cv2.CAP_V4L2:
+                        capture.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*config.CAMERA_FORMAT))
+                    capture.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
+                    capture.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
                     capture.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    logging.info('Camera mode: requested %sx%s %s; negotiated %sx%s',
+                                 config.CAMERA_WIDTH, config.CAMERA_HEIGHT, config.CAMERA_FORMAT,
+                                 capture.get(cv2.CAP_PROP_FRAME_WIDTH), capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
                     next_detection = 0
                 ok, frame = capture.read()
                 if not ok:
