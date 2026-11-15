@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import Mock
 
 from camera import Occupancy
-from config import Config, ConfigStore, load_config
+from config_store import Config, ConfigStore, load_config
 from detector import Detector
 from scheduler import Scheduler
 from server import make_server
@@ -40,11 +40,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(before, self.store.snapshot())
 
     def test_camera_selection(self):
-        for device in ('0', '9', '/dev/video2'):
-            self.store.update({'CAMERA_DEVICE': device})
-            self.assertEqual(device, load_config(self.path).CAMERA_DEVICE)
         before = self.path.read_text()
-        for device in ('https://example.com', '../private', '0 # comment', -1, 10):
+        for device in ('0', '/dev/video2'):
             with self.assertRaises(ValueError):
                 self.store.update({'CAMERA_DEVICE': device})
             self.assertEqual(before, self.path.read_text())
@@ -186,10 +183,9 @@ class HTTPTests(unittest.TestCase):
         status, body, _ = self.request('GET', '/settings')
         self.assertEqual(200, status)
         self.assertNotIn('PHOTO_DIR', json.loads(body))
-        self.assertIn('CAMERA_DEVICE', json.loads(body))
+        self.assertNotIn('CAMERA_DEVICE', json.loads(body))
         headers = {'Content-Type': 'application/json'}
-        self.assertEqual(200, self.request('POST', '/settings', '{"CAMERA_DEVICE": "1"}', headers)[0])
-        self.assertEqual('1', load_config(self.path).CAMERA_DEVICE)
+        self.assertEqual(400, self.request('POST', '/settings', '{"CAMERA_DEVICE": "1"}', headers)[0])
         self.assertEqual(200, self.request('POST', '/settings', '{"EMPTY_TIMEOUT": 10}', headers)[0])
         self.assertEqual(10, load_config(self.path).EMPTY_TIMEOUT)
         for body in ('{"PORT": 1}', '{"EMPTY_TIMEOUT": -1}', '[]', 'invalid'):
@@ -286,8 +282,10 @@ class CameraTests(unittest.TestCase):
             capture.read.side_effect = read
             detector = Mock()
             detector.has_person.side_effect = positives
-            with patch('cv2.VideoCapture', return_value=capture), patch('camera.time.monotonic', side_effect=lambda: now[0]):
+            with patch('cv2.VideoCapture', return_value=capture), patch('camera.time.monotonic', side_effect=lambda: now[0]), self.assertLogs(level='INFO') as logs:
                 CameraWorker(store, detector, stop).run()
+            self.assertEqual(sum(positives), sum('PERSON detected' in line for line in logs.output))
+            self.assertEqual(len(positives) - sum(positives), sum('PERSON not detected' in line for line in logs.output))
             photos = list(Path(directory).glob('*.jpg'))
             self.assertEqual(1, len(photos))
             self.assertEqual(frame.shape, cv2.imread(str(photos[0])).shape)

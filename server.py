@@ -12,7 +12,7 @@ import shutil
 import time
 from urllib.parse import quote, unquote, urlsplit
 
-from config import EDITABLE
+from config_store import EDITABLE
 from camera import save_photo
 
 TEMPLATE = Path(__file__).parent / 'static/index.html'

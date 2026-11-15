@@ -98,6 +98,8 @@ class CameraWorker(threading.Thread):
                 except Exception:
                     logging.exception('Detection failed; discarding frame')
                     continue
+                logging.info('PERSON %s (confidence threshold %.2f)',
+                             'detected' if positive else 'not detected', config.PERSON_CONFIDENCE)
                 was_occupied = occupancy.occupied
                 occupied = occupancy.update(positive, now, config.EMPTY_TIMEOUT)
                 if was_occupied != occupied:

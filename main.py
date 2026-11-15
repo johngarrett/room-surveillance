@@ -5,7 +5,7 @@ import signal
 import threading
 
 from camera import CameraWorker
-from config import ConfigStore
+from config_store import ConfigStore
 from detector import Detector
 from server import make_server, RecentLogs
 

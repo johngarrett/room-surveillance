@@ -15,15 +15,18 @@
     form { display: grid; gap: 8px; max-width: 360px; margin-top: 12px; }
     label { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
     .help { color: #666; font-size: 12px; line-height: 1.4; margin: -4px 0 8px; }
-    input, select, button { font: inherit; }
+    input, button { font: inherit; }
     input[type=number] { width: 100px; }
     button { width: fit-content; }
-    .live { max-width: 960px; margin-bottom: 20px; }
-    .monitor { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 20px; }
-    #logs { height: 240px; overflow: auto; background: #f5f5f5; border: 1px solid #ddd; padding: 10px; margin: 0; font: inherit; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .live { max-width: 320px; }
+    .monitor { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; margin-top: 12px; }
+    #logs { height: 180px; overflow: auto; border: 1px solid #ddd; padding: 8px; margin: 0; font: inherit; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+    @media (max-width: 560px) { .monitor { grid-template-columns: minmax(0, 1fr); } }
   </style>
 </head>
 <body>
+  <details id="settings">
+    <summary>settings</summary>
   <div class="monitor">
   <section class="live" aria-label="Live camera">
     <img id="live" alt="Live camera feed">
@@ -33,11 +36,7 @@
   </section>
   <aside aria-label="Application logs"><pre id="logs" tabindex="0">Loading logs…</pre></aside>
   </div>
-  <details id="settings">
-    <summary>settings</summary>
     <form id="form">
-      <label>camera <select name="CAMERA_DEVICE" aria-describedby="camera-help" required></select></label>
-      <p class="help" id="camera-help">Save to switch. Docker requires the selected device to be mapped.</p>
       <label>capture enabled <input name="CAPTURE_ENABLED" type="checkbox" aria-describedby="capture-help"></label>
       <p class="help" id="capture-help">Automatically save photos when people are present.</p>
       <label>minimum interval (seconds) <input name="MIN_CAPTURE_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="minimum-help" required></label>
@@ -59,7 +58,7 @@
     const logs = document.getElementById('logs');
     async function refreshLogs() {
       try {
-        if (!document.hidden) {
+        if (!document.hidden && document.getElementById('settings').open) {
           const response = await fetch('/logs');
           if (!response.ok) throw new Error('Logs unavailable; restart the app');
           const lines = await response.json();
@@ -102,12 +101,12 @@
     const live = document.getElementById('live');
     const liveStatus = document.getElementById('live-status');
     function refreshLive() {
-      if (!document.hidden) live.src = `/live.jpg?t=${Date.now()}`;
+      if (!document.hidden && document.getElementById('settings').open) live.src = `/live.jpg?t=${Date.now()}`;
       else setTimeout(refreshLive, 1000);
     }
     live.addEventListener('load', () => {
       live.hidden = false;
-      liveStatus.textContent = 'live';
+      liveStatus.textContent = '';
       setTimeout(refreshLive, 200);
     });
     live.addEventListener('error', () => {
@@ -128,10 +127,7 @@
         const settings = await response.json();
         for (const [key, value] of Object.entries(settings)) {
           const input = form.elements.namedItem(key);
-          if (key === 'CAMERA_DEVICE') {
-            const devices = [...new Set([String(value), ...Array.from({length: 10}, (_, i) => String(i))])];
-            input.replaceChildren(...devices.map(device => new Option(device.startsWith('/dev/') ? device : `Camera ${device}`, device)));
-          }
+          if (!input) continue;
           if (input.type === 'checkbox') input.checked = value;
           else input.value = value;
         }
@@ -146,7 +142,6 @@
       for (const input of form.querySelectorAll('input')) {
         settings[input.name] = input.type === 'checkbox' ? input.checked : Number(input.value);
       }
-      settings.CAMERA_DEVICE = form.elements.namedItem('CAMERA_DEVICE').value;
       try {
         const response = await fetch('/settings', {
           method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(settings)

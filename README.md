@@ -43,7 +43,7 @@ paths, and matching config/Compose settings. Run it outside Docker so it can see
 all host cameras. Some webcams expose metadata nodes as well as capture nodes;
 use `v4l2-ctl --device=/dev/videoN --all` to check for video capture capability.
 The website can switch only among devices available to the process. Docker must
-map every camera you want to use; changing the dropdown cannot add a device mapping.
+map the camera you want to use and set `CAMERA_DEVICE` in `config/.env`.
 
 ```sh
 mkdir -p config photos
@@ -74,6 +74,8 @@ termination after its 30-second grace period.
 
 `config/.env` is the source of truth; shell environment variables and Compose
 `env_file` are not used. Paths are relative to the process working directory.
+`config_store.py` contains configuration loading and validation code; edit
+`config/.env` to change your settings.
 Run native commands from this project directory. The whole config directory is
 mounted so editor atomic replacements remain visible inside Docker.
 
@@ -93,10 +95,8 @@ Positive intervals are limited to 86400 seconds; empty timeout allows 0–86400.
 Minimum capture interval cannot exceed maximum. Invalid edits keep the previous
 valid snapshot and log a warning. Invalid startup configuration fails clearly.
 Missing keys use defaults. Edit settings through the small `settings` disclosure
-or a text editor. Web settings permit camera selection and capture/detection values, never storage paths,
-ports, or unrelated keys. The camera dropdown selects indices 0–9 and preserves
-the configured device as an option; save to switch without restarting. Numbered
-choices are not a list of detected cameras. Writes are validated and atomic and
+or a text editor. Web settings permit capture/detection values. Set camera devices,
+storage paths, and ports in `config/.env`. Writes are validated and atomic and
 preserve comments and unrelated settings. Avoid simultaneous web/editor saves:
 as with ordinary files, the last writer wins.
 

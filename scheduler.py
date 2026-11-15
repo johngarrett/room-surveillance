@@ -1,6 +1,6 @@
 """Monotonic deadlines, checked only on fresh detection frames."""
 import random
-from config import Config
+from config_store import Config
 
 
 class Scheduler:
