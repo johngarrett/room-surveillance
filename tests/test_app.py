@@ -6,7 +6,7 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from camera import Occupancy
 from config_store import Config, ConfigStore, load_config
@@ -116,7 +116,7 @@ class SchedulerTests(unittest.TestCase):
         scheduler.update(0, False, config)
         self.assertFalse(scheduler.due(1000))
         scheduler.update(10, True, config)
-        self.assertTrue(70 <= scheduler.deadline <= 310)
+        self.assertTrue(130 <= scheduler.deadline <= 310)
         deadline = scheduler.deadline
         scheduler.update(11, True, config)
         self.assertEqual(deadline, scheduler.deadline)
@@ -168,6 +168,12 @@ class HTTPTests(unittest.TestCase):
         root = Path(self.temp.name)
         self.photos = root / 'photos'
         self.photos.mkdir()
+        metadata = root / 'metadata'
+        metadata.write_text('{"hidden": []}')
+        self.metadata = metadata
+        patcher = patch('server.METADATA', metadata)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.path = root / '.env'
         self.path.write_text(f'PHOTO_DIR={self.photos}\n')
         self.store = ConfigStore(self.path)
@@ -205,6 +211,29 @@ class HTTPTests(unittest.TestCase):
         for path in ('/.env', '/photos/../.env', '/photos/%2e%2e%2f.env',
                      '/photos/20261113_102305.jpg', '/photos/20261110_102305.jpg'):
             self.assertEqual(404, self.request('GET', path)[0])
+
+    def test_hidden_photos(self):
+        name = '20261111_102305.jpg'
+        (self.photos / name).write_bytes(b'jpeg')
+        headers = {'Content-Type': 'application/json'}
+        def hide(value):
+            return self.request('POST', '/hidden', json.dumps({'name': name, 'hidden': value}), headers)[0]
+        self.assertEqual(403, self.request('POST', '/hidden', '{}')[0])
+        self.assertEqual(400, self.request('POST', '/hidden', '{"name":"../x","hidden":true}', headers)[0])
+        self.assertEqual(200, hide(True))
+        self.assertEqual(200, hide(True))
+        self.assertEqual({'hidden': [name]}, json.loads(self.metadata.read_text()))
+        self.assertIn(b'>unhide</button>', self.request('GET', '/')[1])
+        self.store._snapshot = replace(self.store.snapshot(), SHOW_HIDDEN=False)
+        self.assertNotIn(name.encode(), self.request('GET', '/')[1])
+        self.assertEqual(200, self.request('GET', '/photos/' + name)[0])
+        self.assertEqual(200, hide(False))
+        self.assertEqual([], json.loads(self.metadata.read_text())['hidden'])
+        self.store._snapshot = replace(self.store.snapshot(), SHOW_HIDDEN_BUTTON=False)
+        self.assertNotIn(b'class="hide-photo"', self.request('GET', '/')[1])
+        self.metadata.write_text('broken')
+        self.assertEqual(400, hide(True))
+        self.assertEqual('broken', self.metadata.read_text())
 
     def test_settings(self):
         status, body, _ = self.request('GET', '/settings')
@@ -339,9 +368,10 @@ class SnapshotTests(unittest.TestCase):
         store.changed = threading.Event()
         stop = threading.Event()
         worker = CameraWorker(store, Mock(), stop)
-        with patch('camera.time.monotonic', side_effect=[0, 0, 300]), patch.object(stop, 'wait', return_value=False) as wait:
+        with patch('camera.random.uniform', return_value=180) as random_wait, patch('camera.time.monotonic', side_effect=[0, 0, 180]), patch.object(stop, 'wait', return_value=False) as wait:
             worker.wait_for_snapshot(Config())
         wait.assert_called_once_with(1)
+        random_wait.assert_called_once_with(120, 300)
         store.changed.set()
         with patch.object(stop, 'wait') as wait:
             worker.wait_for_snapshot(Config())

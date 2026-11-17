@@ -2,6 +2,7 @@
 from datetime import datetime
 import logging
 import platform
+import random
 import threading
 import time
 import uuid
@@ -51,8 +52,9 @@ class CameraWorker(threading.Thread):
         self.preview_frame = None
 
     def wait_for_snapshot(self, config):
-        deadline = time.monotonic() + config.CAMERA_SNAPSHOT_INTERVAL
-        logging.info('Snapshot mode: camera released; next check in %s seconds', config.CAMERA_SNAPSHOT_INTERVAL)
+        interval = random.uniform(config.MIN_CAPTURE_INTERVAL, config.MAX_CAPTURE_INTERVAL)
+        deadline = time.monotonic() + interval
+        logging.info('Snapshot mode: camera released; next check in %s seconds', interval)
         while not self.stop_event.is_set() and not self.store.changed.is_set():
             remaining = deadline - time.monotonic()
             if remaining <= 0 or self.stop_event.wait(min(1, remaining)):
@@ -130,9 +132,8 @@ class CameraWorker(threading.Thread):
                     self.preview_frame = None
                 if not ok:
                     self.preview_frame = None
-                    retry_delay = (config.CAMERA_SNAPSHOT_INTERVAL if config.CAMERA_SNAPSHOT_ENABLED
-                                   else 20 if config.CAMERA_CYCLE_ENABLED else 3)
-                    logging.warning('Camera unavailable: %s; retrying in %s seconds', device, retry_delay)
+                    retry_delay = 20 if config.CAMERA_CYCLE_ENABLED else 3
+                    logging.warning('Camera unavailable: %s', device)
                     if capture is not None:
                         capture.release()
                         capture = None

@@ -91,25 +91,25 @@ mounted so editor atomic replacements remain visible inside Docker.
 | CAMERA_FPS | 25 | Requested capture frame rate, 1–240; must be supported by the camera |
 | CAMERA_CYCLE_ENABLED | false | Workaround: alternate 5 seconds streaming with 20 seconds released |
 | CAMERA_SNAPSHOT_ENABLED | false | Open briefly for one frame, release, then detect and save only if a person is found |
-| CAMERA_SNAPSHOT_INTERVAL | 300 | Seconds between snapshot attempts, measured after each completed attempt |
+| CAMERA_SNAPSHOT_INTERVAL | 300 | Legacy setting; cooldown bounds now control snapshot attempts |
 | DETECTION_INTERVAL | 3 | Seconds between inference checks |
 | PERSON_CONFIDENCE | 0.5 | Person confidence threshold, 0–1 |
 | EMPTY_TIMEOUT | 30 | Seconds since last positive detection before vacancy |
 | CAPTURE_ENABLED | true | `true` or `false` |
-| MIN_CAPTURE_INTERVAL | 60 | Minimum seconds between photos |
+| MIN_CAPTURE_INTERVAL | 120 | Minimum seconds between photos |
 | MAX_CAPTURE_INTERVAL | 300 | Maximum seconds between photos |
 | PHOTO_DIR | ./photos | Output directory |
 | PORT | 5418 | HTTP port; restart required to change |
 
 Positive intervals are limited to 86400 seconds; empty timeout allows 0–86400.
 For periodic photos without a continuous stream, set `CAMERA_SNAPSHOT_ENABLED=true`
-and `CAMERA_SNAPSHOT_INTERVAL=300` in `config/.env`. The first attempt is immediate;
-later attempts run five minutes after the previous attempt finishes. Each attempt
+and cooldown bounds `MIN_CAPTURE_INTERVAL=120`, `MAX_CAPTURE_INTERVAL=300` in `config/.env`. The first attempt is immediate;
+later attempts wait a newly chosen random cooldown after the previous attempt finishes. Each attempt
 opens the configured camera, reads one full-resolution frame, releases the camera,
 then runs detection. One positive detection saves that frame; otherwise it is
-discarded without writing an image to disk. Failures also wait the full interval.
+discarded without writing an image to disk. Each completed attempt, including failures, draws a new random cooldown between the configured bounds.
 `CAPTURE_ENABLED=false` prevents snapshot attempts entirely. Snapshot mode ignores
-the continuous detection, vacancy, random capture intervals, and camera cycling
+the continuous detection, vacancy, and camera cycling
 settings, but uses `PERSON_CONFIDENCE` and the configured camera mode. Live preview
 and manual capture are disabled; reload the page after changing modes. Existing
 photos remain available. Configuration edits interrupt the wait within a second;
@@ -191,3 +191,5 @@ Real Linux webcam capture, Linux/AMD64, LAN access, and long-running resource
 usage still require deployment hardware. An extra running-process HTTP smoke
 check was blocked by local Docker-exec permissions; HTTP and live configuration
 behavior are covered by the container test suite.
+
+Gallery settings include **show hidden** and **show hidden button**, both on by default. Hide/unhide writes image names to the `hidden` array in `images/metadata`; photo files remain accessible and are never deleted. Compose persists this directory. Cooldown bounds apply to continuous capture and snapshot attempts; the old `CAMERA_SNAPSHOT_INTERVAL` setting is retained for config compatibility but no longer controls the wait.

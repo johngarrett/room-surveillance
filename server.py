@@ -10,12 +10,16 @@ from pathlib import Path
 import re
 import shutil
 import time
+import threading
+import os
+import tempfile
 from urllib.parse import quote, unquote, urlsplit
 
 from config_store import EDITABLE
 from camera import save_photo
 
 TEMPLATE = Path(__file__).parent / 'static/index.html'
+METADATA = Path(__file__).parent / 'images/metadata'
 PHOTO_NAME = re.compile(r'^\d{8}_\d{6}(?:_[a-zA-Z0-9]+)?\.jpg$')
 
 
@@ -41,6 +45,17 @@ class RecentLogs(logging.Handler):
 
 
 def make_server(store, camera=None, logs=None):
+    metadata_lock = threading.Lock()
+    def read_metadata():
+        try:
+            data = json.loads(METADATA.read_text())
+        except FileNotFoundError:
+            return {'hidden': []}
+        if not isinstance(data, dict) or not isinstance(data.get('hidden'), list) or any(
+                not isinstance(name, str) or not PHOTO_NAME.fullmatch(name) for name in data['hidden']):
+            raise ValueError('Invalid image metadata')
+        return data
+
     class Handler(BaseHTTPRequestHandler):
         def send(self, status, body, content_type='application/json; charset=utf-8'):
             self.send_response(status)
@@ -80,6 +95,13 @@ def make_server(store, camera=None, logs=None):
                 values = asdict(config)
                 self.send(200, json.dumps({key: values[key] for key in sorted(EDITABLE)}).encode())
             elif route == '/':
+                try:
+                    with metadata_lock:
+                        hidden = read_metadata()['hidden']
+                except (OSError, ValueError):
+                    logging.exception('Cannot read image metadata')
+                    self.send_error(500)
+                    return
                 photos = []
                 for path in sorted(config.PHOTO_DIR.glob('*.jpg'), reverse=True):
                     if not PHOTO_NAME.fullmatch(path.name) or path.is_symlink() or not path.is_file():
@@ -88,7 +110,12 @@ def make_server(store, camera=None, logs=None):
                         caption = photo_caption(path.name)
                     except ValueError:
                         continue
-                    photos.append(f'<figure><a href="/photos/{quote(path.name)}"><img src="/photos/{quote(path.name)}" loading="lazy" alt=""></a><figcaption>{escape(caption)}</figcaption></figure>')
+                    is_hidden = path.name in hidden
+                    if is_hidden and not config.SHOW_HIDDEN:
+                        continue
+                    button = (f'<button type="button" class="hide-photo" aria-pressed="{str(is_hidden).lower()}">'
+                              f'{"unhide" if is_hidden else "hide"}</button>' if config.SHOW_HIDDEN_BUTTON else '')
+                    photos.append(f'<figure data-name="{escape(path.name)}"><a href="/photos/{quote(path.name)}"><img src="/photos/{quote(path.name)}" loading="lazy" alt=""></a><figcaption><span>{escape(caption)}</span>{button}</figcaption></figure>')
                 try:
                     body = (TEMPLATE.read_text().replace('{{photos}}', '\n'.join(photos))
                             .replace('{{snapshot_mode}}', 'true' if config.CAMERA_SNAPSHOT_ENABLED else 'false').encode())
@@ -121,7 +148,7 @@ def make_server(store, camera=None, logs=None):
                 self.send_error(404)
 
         def do_POST(self):
-            if self.path not in ('/settings', '/capture'):
+            if self.path not in ('/settings', '/capture', '/hidden'):
                 self.send_error(404)
                 return
             # JSON-only writes prevent cross-origin HTML forms from changing settings.
@@ -139,6 +166,34 @@ def make_server(store, camera=None, logs=None):
                 updates = json.loads(self.rfile.read(length))
                 if not isinstance(updates, dict):
                     raise ValueError('Expected a settings object')
+                if self.path == '/hidden':
+                    name = updates.get('name')
+                    hidden = updates.get('hidden')
+                    if not isinstance(name, str) or not PHOTO_NAME.fullmatch(name) or type(hidden) is not bool:
+                        raise ValueError('Expected a photo name and hidden boolean')
+                    photo = store.snapshot().PHOTO_DIR / name
+                    if photo.is_symlink() or not photo.is_file():
+                        self.send_error(404)
+                        return
+                    with metadata_lock:
+                        METADATA.parent.mkdir(parents=True, exist_ok=True)
+                        data = read_metadata()
+                        data['hidden'] = [item for item in data['hidden'] if item != name]
+                        if hidden:
+                            data['hidden'].append(name)
+                        temporary = None
+                        try:
+                            with tempfile.NamedTemporaryFile(mode='w', dir=METADATA.parent, delete=False) as file:
+                                temporary = Path(file.name)
+                                json.dump(data, file)
+                                file.flush()
+                                os.fsync(file.fileno())
+                            temporary.replace(METADATA)
+                        finally:
+                            if temporary is not None:
+                                temporary.unlink(missing_ok=True)
+                    self.send(200, b'{"saved": true}')
+                    return
                 if self.path == '/capture':
                     if store.snapshot().CAMERA_SNAPSHOT_ENABLED:
                         self.send(409, b'{"error": "Manual capture is disabled in snapshot mode"}')
@@ -157,6 +212,7 @@ def make_server(store, camera=None, logs=None):
                     self.send(200, json.dumps({'url': '/photos/' + name, 'caption': photo_caption(name)}).encode())
                     return
                 store.update(updates)
+                store.reload()
                 self.send(200, b'{"saved": true}')
             except (ValueError, UnicodeError, TimeoutError) as error:
                 self.send(400, json.dumps({'error': str(error)}).encode())

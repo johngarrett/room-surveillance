@@ -15,7 +15,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 EDITABLE = {'CAPTURE_ENABLED', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL',
-            'DETECTION_INTERVAL', 'PERSON_CONFIDENCE', 'EMPTY_TIMEOUT'}
+            'DETECTION_INTERVAL', 'PERSON_CONFIDENCE', 'EMPTY_TIMEOUT', 'SHOW_HIDDEN', 'SHOW_HIDDEN_BUTTON'}
 
 
 @dataclass(frozen=True)
@@ -32,8 +32,10 @@ class Config:
     PERSON_CONFIDENCE: float = .5
     EMPTY_TIMEOUT: float = 30
     CAPTURE_ENABLED: bool = True
-    MIN_CAPTURE_INTERVAL: float = 60
+    MIN_CAPTURE_INTERVAL: float = 120
     MAX_CAPTURE_INTERVAL: float = 300
+    SHOW_HIDDEN: bool = True
+    SHOW_HIDDEN_BUTTON: bool = True
     PHOTO_DIR: Path = Path('./photos')
     PORT: int = 5418
 
@@ -52,7 +54,7 @@ def load_config(path: Path) -> Config:
         value = values[key]
         if value is None or not value.strip():
             raise ValueError(f'{key} must not be empty')
-        if key in ('CAPTURE_ENABLED', 'CAMERA_CYCLE_ENABLED', 'CAMERA_SNAPSHOT_ENABLED'):
+        if key in ('CAPTURE_ENABLED', 'CAMERA_CYCLE_ENABLED', 'CAMERA_SNAPSHOT_ENABLED', 'SHOW_HIDDEN', 'SHOW_HIDDEN_BUTTON'):
             if value.lower() not in ('true', 'false'):
                 raise ValueError(f'{key} must be true or false')
             defaults[key] = value.lower() == 'true'

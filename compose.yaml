@@ -10,6 +10,7 @@ services:
       - "5418:5418"
     volumes:
       - ./photos:/app/photos
+      - ./images:/app/images
       - ./config:/app/config
       - /etc/localtime:/etc/localtime:ro
     environment:

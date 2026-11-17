@@ -11,6 +11,6 @@ RUN python -c "from ultralytics import YOLO; YOLO('yolo11n.pt')"
 RUN echo '0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1  yolo11n.pt' | sha256sum -c -
 COPY main.py camera.py detector.py scheduler.py config_store.py server.py ./
 COPY static ./static
-RUN mkdir -p photos config
+RUN mkdir -p photos config images
 EXPOSE 5418
 CMD ["python", "main.py"]
