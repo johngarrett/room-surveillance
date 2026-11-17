@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 import numpy as np
 
-from camera import Motion, Occupancy
+from camera import Motion, Occupancy, PhotoFilter
 from config_store import Config, ConfigStore, load_config
 from detector import Detector
 from scheduler import Scheduler
@@ -53,6 +53,31 @@ class MotionTests(unittest.TestCase):
                         patch('camera.save_photo', side_effect=lambda *_: times.append(now[0])):
                     CameraWorker(store, detector, stop).run()
                 self.assertEqual([2, 4, 6] if enabled and positive else [], times)
+
+
+class PhotoFilterTests(unittest.TestCase):
+    def test_compares_with_last_save_and_keeps_half_hour_sample(self):
+        photos = PhotoFilter()
+        frame = np.zeros((90, 160, 3), dtype=np.uint8)
+        with patch('camera.save_photo') as save:
+            self.assertTrue(photos.save(frame, Path('photos'), 0))
+            self.assertFalse(photos.save(frame.copy(), Path('photos'), 120))
+            frame[:4] = 255
+            self.assertFalse(photos.save(frame, Path('photos'), 240))
+            frame[4:8] = 255
+            self.assertTrue(photos.save(frame, Path('photos'), 360))
+            self.assertFalse(photos.save(frame, Path('photos'), 2159))
+            self.assertTrue(photos.save(frame, Path('photos'), 2160))
+            self.assertEqual(3, save.call_count)
+
+    def test_failed_save_does_not_advance_reference(self):
+        photos = PhotoFilter()
+        frame = np.zeros((90, 160, 3), dtype=np.uint8)
+        with patch('camera.save_photo', side_effect=[OSError('disk full'), 'photo.jpg']) as save:
+            with self.assertRaises(OSError):
+                photos.save(frame, Path('photos'), 0)
+            self.assertTrue(photos.save(frame, Path('photos'), 1))
+            self.assertEqual(2, save.call_count)
 
 
 class ConfigTests(unittest.TestCase):

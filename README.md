@@ -155,6 +155,14 @@ depends on camera and inference speed; cycling pauses interrupt motion capture,
 and snapshot mode does not measure motion. When movement stops, the normal random
 cooldown resumes from the last capture.
 
+Both automatic capture modes skip frames that look similar to the last successfully
+saved automatic photo. They reuse the motion threshold above, comparing against
+that saved photo rather than the previous detection frame. After 30 minutes,
+the next eligible capture is saved even if unchanged; person detection and the
+normal capture schedule still apply. Manual photos always save. The comparison
+resets when the app restarts and does not examine existing photos. Lighting changes
+can still produce extra photos; small pose changes may be skipped.
+
 Photos use local timestamps, with a unique suffix, e.g.
 `20261111_102305_a1b2c3d4.jpg`. The gallery sorts these names newest first, loads
 JPEGs separately and needs a page reload to show new photos. Edit

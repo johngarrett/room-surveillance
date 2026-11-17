@@ -60,6 +60,24 @@ class Motion:
         return changed.mean() >= .05
 
 
+class PhotoFilter:
+    def __init__(self):
+        self.previous = None
+        self.last_saved = None
+
+    def save(self, frame, directory, now):
+        comparison = Motion()
+        comparison.previous = self.previous
+        different = comparison.update(frame)
+        if self.last_saved is not None and now - self.last_saved < 1800 and not different:
+            logging.info('Photo skipped: similar to last saved automatic photo')
+            return False
+        save_photo(frame, directory)
+        self.previous = comparison.previous
+        self.last_saved = now
+        return True
+
+
 class CameraWorker(threading.Thread):
     def __init__(self, store, detector, stop):
         super().__init__(name='camera')
@@ -86,6 +104,7 @@ class CameraWorker(threading.Thread):
         occupancy = Occupancy()
         scheduler = Scheduler()
         motion = Motion()
+        photos = PhotoFilter()
         last_photo = None
         next_detection = 0
         previous_config = None
@@ -183,7 +202,7 @@ class CameraWorker(threading.Thread):
                 if config.CAMERA_SNAPSHOT_ENABLED:
                     if positive and not self.stop_event.is_set() and self.store.snapshot() == config:
                         try:
-                            save_photo(frame, config.PHOTO_DIR)
+                            photos.save(frame, config.PHOTO_DIR, now)
                         except (OSError, cv2.error):
                             logging.exception('Unable to save snapshot')
                     elif not positive:
@@ -202,8 +221,8 @@ class CameraWorker(threading.Thread):
                     if self.store.snapshot() != config:
                         continue
                     try:
-                        save_photo(frame, config.PHOTO_DIR)
-                        last_photo = now
+                        if photos.save(frame, config.PHOTO_DIR, now):
+                            last_photo = now
                     except (OSError, cv2.error):
                         logging.exception('Unable to save photograph')
                     scheduler.schedule(time.monotonic(), config)
