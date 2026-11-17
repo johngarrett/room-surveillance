@@ -92,7 +92,7 @@ mounted so editor atomic replacements remain visible inside Docker.
 | CAMERA_CYCLE_ENABLED | false | Workaround: alternate 5 seconds streaming with 20 seconds released |
 | CAMERA_SNAPSHOT_ENABLED | false | Open briefly for one frame, release, then detect and save only if a person is found |
 | CAMERA_SNAPSHOT_INTERVAL | 300 | Legacy setting; cooldown bounds now control snapshot attempts |
-| DETECTION_INTERVAL | 3 | Seconds between inference checks |
+| DETECTION_INTERVAL | 3 | Seconds between inference checks; continuous mode caps this at 2 for motion captures |
 | PERSON_CONFIDENCE | 0.5 | Person confidence threshold, 0–1 |
 | EMPTY_TIMEOUT | 30 | Seconds since last positive detection before vacancy |
 | CAPTURE_ENABLED | true | `true` or `false` |
@@ -145,6 +145,15 @@ otherwise it waits. Inference-cycle precision is sufficient: photographs can be
 delayed by one detection interval plus inference time. Pauses never produce a
 catch-up burst. Camera read failures reset occupancy and retry after 3 seconds
 (20 seconds with camera cycling enabled).
+
+In continuous mode, substantial movement overrides the random cooldown: capture
+immediately when movement is detected, then every 2 seconds while it continues.
+Each capture still requires a person detection and automatic capture enabled.
+Movement means at least 5% of a 160×90 grayscale frame changes by more than 25
+brightness levels between checks. Lighting changes can also trigger it. Timing
+depends on camera and inference speed; cycling pauses interrupt motion capture,
+and snapshot mode does not measure motion. When movement stops, the normal random
+cooldown resumes from the last capture.
 
 Photos use local timestamps, with a unique suffix, e.g.
 `20261111_102305_a1b2c3d4.jpg`. The gallery sorts these names newest first, loads

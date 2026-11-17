@@ -8,11 +8,51 @@ import time
 import unittest
 from unittest.mock import Mock, patch
 
-from camera import Occupancy
+import numpy as np
+
+from camera import Motion, Occupancy
 from config_store import Config, ConfigStore, load_config
 from detector import Detector
 from scheduler import Scheduler
 from server import make_server
+
+
+class MotionTests(unittest.TestCase):
+    def test_substantial_changes_only(self):
+        motion = Motion()
+        frame = np.zeros((90, 160, 3), dtype=np.uint8)
+        self.assertFalse(motion.update(frame))
+        self.assertFalse(motion.update(frame.copy()))
+        frame[:1] = 255
+        self.assertFalse(motion.update(frame))
+        frame[:20] = 255
+        self.assertTrue(motion.update(frame))
+
+    def test_movement_captures_every_two_seconds(self):
+        from camera import CameraWorker
+        for enabled, positive in ((True, True), (False, True), (True, False)):
+            with self.subTest(enabled=enabled, positive=positive):
+                store = Mock()
+                store.snapshot.return_value = replace(Config(), CAPTURE_ENABLED=enabled)
+                store.changed = threading.Event()
+                stop = threading.Event()
+                now = [-1]
+                capture = Mock()
+                def read():
+                    now[0] += 1
+                    if now[0] == 8:
+                        stop.set()
+                        return False, None
+                    return True, np.full((90, 160, 3), (now[0] // 2 % 2) * 255, dtype=np.uint8)
+                capture.read.side_effect = read
+                detector = Mock()
+                detector.has_person.return_value = positive
+                times = []
+                with patch('cv2.VideoCapture', return_value=capture), \
+                        patch('camera.time.monotonic', side_effect=lambda: now[0]), \
+                        patch('camera.save_photo', side_effect=lambda *_: times.append(now[0])):
+                    CameraWorker(store, detector, stop).run()
+                self.assertEqual([2, 4, 6] if enabled and positive else [], times)
 
 
 class ConfigTests(unittest.TestCase):
@@ -430,7 +470,7 @@ class CameraTests(unittest.TestCase):
         store.changed = threading.Event()
         stop = threading.Event()
         capture = Mock()
-        capture.read.return_value = (True, object())
+        capture.read.return_value = (True, np.zeros((90, 160, 3), dtype=np.uint8))
         detector = Mock()
         detector.has_person.return_value = False
         with patch('cv2.VideoCapture', return_value=capture) as open_camera, \
@@ -474,7 +514,7 @@ class CameraTests(unittest.TestCase):
             if capture.read.call_count == 2:
                 stop.set()
                 return False, None
-            return True, object()
+            return True, np.zeros((90, 160, 3), dtype=np.uint8)
         capture.read.side_effect = read
         detector = Mock()
         detector.has_person.return_value = False
@@ -498,7 +538,7 @@ class CameraTests(unittest.TestCase):
             if now[0] == 3:
                 stop.set()
                 return False, None
-            return True, object()
+            return True, np.zeros((90, 160, 3), dtype=np.uint8)
         capture = Mock()
         capture.read.side_effect = read
         detector = Mock()

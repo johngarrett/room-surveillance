@@ -45,6 +45,21 @@ class Occupancy:
         return self.occupied
 
 
+class Motion:
+    def __init__(self):
+        self.previous = None
+
+    def update(self, frame):
+        import cv2
+        gray = cv2.cvtColor(cv2.resize(frame, (160, 90)), cv2.COLOR_BGR2GRAY)
+        previous, self.previous = self.previous, gray
+        if previous is None:
+            return False
+        # shortcut: lighting changes also count as motion; calibrate on real room footage if noisy.
+        changed = cv2.absdiff(previous, gray) > 25
+        return changed.mean() >= .05
+
+
 class CameraWorker(threading.Thread):
     def __init__(self, store, detector, stop):
         super().__init__(name='camera')
@@ -70,6 +85,8 @@ class CameraWorker(threading.Thread):
         stream_announced = False
         occupancy = Occupancy()
         scheduler = Scheduler()
+        motion = Motion()
+        last_photo = None
         next_detection = 0
         previous_config = None
         try:
@@ -103,6 +120,7 @@ class CameraWorker(threading.Thread):
                         occupancy = Occupancy()
                         scheduler = Scheduler()
                     cycling = False
+                    motion = Motion()
                     device = config.CAMERA_DEVICE
                     camera_settings = settings
                     source = int(device) if device.isdecimal() else device
@@ -152,7 +170,7 @@ class CameraWorker(threading.Thread):
                     next_detection = now
                 if now < next_detection:
                     continue
-                next_detection = now + config.DETECTION_INTERVAL
+                next_detection = now + min(config.DETECTION_INTERVAL, 2)
                 try:
                     positive = self.detector.has_person(frame, config.PERSON_CONFIDENCE)
                 except Exception:
@@ -173,16 +191,19 @@ class CameraWorker(threading.Thread):
                     self.wait_for_snapshot(config)
                     continue
                 was_occupied = occupancy.occupied
+                moving = motion.update(frame)
                 occupied = occupancy.update(positive, now, config.EMPTY_TIMEOUT)
                 if was_occupied != occupied:
                     logging.info('Room %s', 'occupied' if occupied else 'empty')
                 scheduler.update(now, occupied, config)
-                if positive and scheduler.due(now):
+                motion_due = moving and config.CAPTURE_ENABLED and (last_photo is None or now - last_photo >= 2)
+                if positive and (scheduler.due(now) or motion_due):
                     # A settings change during inference must be applied before saving.
                     if self.store.snapshot() != config:
                         continue
                     try:
                         save_photo(frame, config.PHOTO_DIR)
+                        last_photo = now
                     except (OSError, cv2.error):
                         logging.exception('Unable to save photograph')
                     scheduler.schedule(time.monotonic(), config)
