@@ -45,6 +45,9 @@
       <p class="help" id="minimum-help">Shortest random wait between photos.</p>
       <label>cooldown upper bound (seconds) <input name="MAX_CAPTURE_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="maximum-help" required></label>
       <p class="help" id="maximum-help">Longest random wait; still requires a person.</p>
+      <label>movement cooldown lower bound (seconds) <input name="MIN_MOTION_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="motion-help" required></label>
+      <label>movement cooldown upper bound (seconds) <input name="MAX_MOTION_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="motion-help" required></label>
+      <p class="help" id="motion-help">Random wait after each automatic photo before movement can trigger another. Continuous mode only; the first movement photo is immediate.</p>
       <label>detection interval (seconds) <input name="DETECTION_INTERVAL" type="number" min="0.001" max="86400" step="any" aria-describedby="detection-help" required></label>
       <p class="help" id="detection-help">Seconds between person checks. Lower uses more CPU.</p>
       <label>person confidence <input name="PERSON_CONFIDENCE" type="number" min="0" max="1" step="any" aria-describedby="confidence-help" required></label>

@@ -106,12 +106,18 @@ class CameraWorker(threading.Thread):
         motion = Motion()
         photos = PhotoFilter()
         last_photo = None
+        motion_interval = 0
+        motion_settings = None
         next_detection = 0
         previous_config = None
         try:
             while not self.stop_event.is_set():
                 self.store.changed.clear()
                 config = self.store.snapshot()
+                bounds = (config.MIN_MOTION_INTERVAL, config.MAX_MOTION_INTERVAL)
+                if bounds != motion_settings:
+                    motion_interval = random.uniform(*bounds)
+                    motion_settings = bounds
                 changed = config != previous_config
                 previous_config = config
                 if config.CAMERA_SNAPSHOT_ENABLED and not config.CAPTURE_ENABLED:
@@ -215,7 +221,7 @@ class CameraWorker(threading.Thread):
                 if was_occupied != occupied:
                     logging.info('Room %s', 'occupied' if occupied else 'empty')
                 scheduler.update(now, occupied, config)
-                motion_due = moving and config.CAPTURE_ENABLED and (last_photo is None or now - last_photo >= 2)
+                motion_due = moving and config.CAPTURE_ENABLED and (last_photo is None or now - last_photo >= motion_interval)
                 if positive and (scheduler.due(now) or motion_due):
                     # A settings change during inference must be applied before saving.
                     if self.store.snapshot() != config:
@@ -223,6 +229,7 @@ class CameraWorker(threading.Thread):
                     try:
                         if photos.save(frame, config.PHOTO_DIR, now):
                             last_photo = now
+                            motion_interval = random.uniform(*bounds)
                     except (OSError, cv2.error):
                         logging.exception('Unable to save photograph')
                     scheduler.schedule(time.monotonic(), config)

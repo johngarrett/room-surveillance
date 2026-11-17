@@ -98,6 +98,8 @@ mounted so editor atomic replacements remain visible inside Docker.
 | CAPTURE_ENABLED | true | `true` or `false` |
 | MIN_CAPTURE_INTERVAL | 120 | Minimum seconds between photos |
 | MAX_CAPTURE_INTERVAL | 300 | Maximum seconds between photos |
+| MIN_MOTION_INTERVAL | 2 | Minimum seconds before movement can trigger another photo |
+| MAX_MOTION_INTERVAL | 5 | Maximum random movement cooldown in seconds |
 | PHOTO_DIR | ./photos | Output directory |
 | PORT | 5418 | HTTP port; restart required to change |
 
@@ -147,7 +149,10 @@ catch-up burst. Camera read failures reset occupancy and retry after 3 seconds
 (20 seconds with camera cycling enabled).
 
 In continuous mode, substantial movement overrides the random cooldown: capture
-immediately when movement is detected, then every 2 seconds while it continues.
+immediately when movement is detected, then wait a newly sampled random interval between `MIN_MOTION_INTERVAL` and
+`MAX_MOTION_INTERVAL` after each saved automatic photo before movement can trigger
+another. These bounds are editable in web settings and `config/.env`; the minimum
+cannot exceed the maximum. Changing them redraws the current movement cooldown.
 Each capture still requires a person detection and automatic capture enabled.
 Movement means at least 5% of a 160×90 grayscale frame changes by more than 25
 brightness levels between checks. Lighting changes can also trigger it. Timing

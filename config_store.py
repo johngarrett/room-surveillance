@@ -15,6 +15,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 EDITABLE = {'CAPTURE_ENABLED', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL',
+            'MIN_MOTION_INTERVAL', 'MAX_MOTION_INTERVAL',
             'DETECTION_INTERVAL', 'PERSON_CONFIDENCE', 'EMPTY_TIMEOUT', 'SHOW_HIDDEN', 'SHOW_HIDDEN_BUTTON'}
 
 
@@ -34,6 +35,8 @@ class Config:
     CAPTURE_ENABLED: bool = True
     MIN_CAPTURE_INTERVAL: float = 120
     MAX_CAPTURE_INTERVAL: float = 300
+    MIN_MOTION_INTERVAL: float = 2
+    MAX_MOTION_INTERVAL: float = 5
     SHOW_HIDDEN: bool = True
     SHOW_HIDDEN_BUTTON: bool = True
     PHOTO_DIR: Path = Path('./photos')
@@ -74,7 +77,8 @@ def load_config(path: Path) -> Config:
         raise ValueError('CAMERA_FORMAT must be a four-character format code, e.g. MJPG')
     if not 1 <= config.CAMERA_FPS <= 240:
         raise ValueError('CAMERA_FPS must be between 1 and 240')
-    for key in ('DETECTION_INTERVAL', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL', 'CAMERA_SNAPSHOT_INTERVAL'):
+    for key in ('DETECTION_INTERVAL', 'MIN_CAPTURE_INTERVAL', 'MAX_CAPTURE_INTERVAL', 'CAMERA_SNAPSHOT_INTERVAL',
+                'MIN_MOTION_INTERVAL', 'MAX_MOTION_INTERVAL'):
         value = getattr(config, key)
         if not math.isfinite(value) or not 0 < value <= 86400:
             raise ValueError(f'{key} must be greater than 0 and at most 86400')
@@ -84,6 +88,8 @@ def load_config(path: Path) -> Config:
         raise ValueError('EMPTY_TIMEOUT must be between 0 and 86400')
     if config.MIN_CAPTURE_INTERVAL > config.MAX_CAPTURE_INTERVAL:
         raise ValueError('Minimum capture interval exceeds maximum')
+    if config.MIN_MOTION_INTERVAL > config.MAX_MOTION_INTERVAL:
+        raise ValueError('Minimum motion interval exceeds maximum')
     if not 1 <= config.PORT <= 65535:
         raise ValueError('PORT must be between 1 and 65535')
     return config

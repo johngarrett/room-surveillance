@@ -28,12 +28,13 @@ class MotionTests(unittest.TestCase):
         frame[:20] = 255
         self.assertTrue(motion.update(frame))
 
-    def test_movement_captures_every_two_seconds(self):
+    def test_movement_captures_use_random_cooldown(self):
         from camera import CameraWorker
         for enabled, positive in ((True, True), (False, True), (True, False)):
             with self.subTest(enabled=enabled, positive=positive):
                 store = Mock()
-                store.snapshot.return_value = replace(Config(), CAPTURE_ENABLED=enabled)
+                store.snapshot.return_value = replace(Config(), CAPTURE_ENABLED=enabled,
+                                                      MIN_MOTION_INTERVAL=2, MAX_MOTION_INTERVAL=6)
                 store.changed = threading.Event()
                 stop = threading.Event()
                 now = [-1]
@@ -43,16 +44,18 @@ class MotionTests(unittest.TestCase):
                     if now[0] == 8:
                         stop.set()
                         return False, None
-                    return True, np.full((90, 160, 3), (now[0] // 2 % 2) * 255, dtype=np.uint8)
+                    return True, np.full((90, 160, 3), (now[0] // 2 % 3) * 100, dtype=np.uint8)
                 capture.read.side_effect = read
                 detector = Mock()
                 detector.has_person.return_value = positive
                 times = []
                 with patch('cv2.VideoCapture', return_value=capture), \
                         patch('camera.time.monotonic', side_effect=lambda: now[0]), \
-                        patch('camera.save_photo', side_effect=lambda *_: times.append(now[0])):
+                        patch('camera.save_photo', side_effect=lambda *_: times.append(now[0])), \
+                        patch('camera.random.uniform', side_effect=[2, 120, 4, 120, 2, 120]) as draw:
                     CameraWorker(store, detector, stop).run()
-                self.assertEqual([2, 4, 6] if enabled and positive else [], times)
+                self.assertEqual([2, 6] if enabled and positive else [], times)
+                self.assertEqual((2, 6), draw.call_args_list[0].args)
 
 
 class PhotoFilterTests(unittest.TestCase):
@@ -90,6 +93,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_validation(self):
         for text in ('DETECTION_INTERVAL=0', 'MIN_CAPTURE_INTERVAL=500',
+                     'MIN_MOTION_INTERVAL=0', 'MAX_MOTION_INTERVAL=nan',
+                     'MAX_MOTION_INTERVAL=86401', 'MIN_MOTION_INTERVAL=6',
                      'PERSON_CONFIDENCE=nan', 'EMPTY_TIMEOUT=inf',
                      'CAPTURE_ENABLED=yes', 'PORT=0', 'MAX_CAPTURE_INTERVAL=nan',
                      'PERSON_CONFIDENCE="unterminated', 'CAMERA_WIDTH=0',
@@ -305,7 +310,13 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(200, status)
         self.assertNotIn('PHOTO_DIR', json.loads(body))
         self.assertNotIn('CAMERA_DEVICE', json.loads(body))
+        self.assertEqual(2, json.loads(body)['MIN_MOTION_INTERVAL'])
+        self.assertEqual(5, json.loads(body)['MAX_MOTION_INTERVAL'])
         headers = {'Content-Type': 'application/json'}
+        self.assertEqual(200, self.request('POST', '/settings',
+                         '{"MIN_MOTION_INTERVAL": 4, "MAX_MOTION_INTERVAL": 8}', headers)[0])
+        self.assertEqual(4, load_config(self.path).MIN_MOTION_INTERVAL)
+        self.assertEqual(8, load_config(self.path).MAX_MOTION_INTERVAL)
         self.assertEqual(400, self.request('POST', '/settings', '{"CAMERA_DEVICE": "1"}', headers)[0])
         self.assertEqual(200, self.request('POST', '/settings', '{"EMPTY_TIMEOUT": 10}', headers)[0])
         self.assertEqual(10, load_config(self.path).EMPTY_TIMEOUT)
